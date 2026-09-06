@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @page {
+    size: A4;
+    margin: 2.2cm 1.8cm;
+    @bottom-center {
+      content: "Irei Sensei · Plan alimenticio personalizado";
+      font-size: 8pt;
+      color: #888;
+    }
+  }
+  body {
+    font-family: "Helvetica", "Arial", sans-serif;
+    color: #222;
+    font-size: 11pt;
+    line-height: 1.4;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    border-bottom: 3px solid #111;
+    padding-bottom: 12px;
+    margin-bottom: 20px;
+  }
+  header img {
+    height: 85px;
+    width: auto;
+    margin-right: 16px;
+  }
+  header h1 {
+    font-size: 18pt;
+    margin: 0;
+  }
+  header .subtitulo {
+    font-size: 10pt;
+    color: #555;
+  }
+  .datos-usuario {
+    background: #f4f4f4;
+    padding: 10px 14px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    font-size: 10pt;
+  }
+  h2 {
+    font-size: 13pt;
+    border-left: 4px solid #111;
+    padding-left: 8px;
+    margin-top: 24px;
+  }
+  .comida {
+    margin-bottom: 10px;
+  }
+  .comida .nombre {
+    font-weight: bold;
+  }
+  .advertencias {
+    margin-top: 24px;
+    background: #fff3cd;
+    border: 1px solid #ffe08a;
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 10pt;
+  }
+  .advertencias h2 {
+    border-left-color: #b8860b;
+    margin-top: 0;
+  }
+  footer.nota-legal {
+    margin-top: 30px;
+    font-size: 8pt;
+    color: #888;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <img src="{{ logo_path }}" alt="Irei Sensei">
+  <div>
+    <h1>Plan alimenticio mensual</h1>
+    <div class="subtitulo">{{ mes_legible }}</div>
+  </div>
+</header>
+
+<div class="datos-usuario">
+  <strong>Alumno:</strong> {{ nombre }}<br>
+  <strong>Objetivo:</strong> {{ objetivo }}
+</div>
+
+<h2>Comidas del día</h2>
+{% for comida in comidas %}
+<div class="comida">
+  <div class="nombre">{{ comida.nombre }}</div>
+  <div>{{ comida.descripcion }}</div>
+</div>
+{% endfor %}
+
+{% if advertencias %}
+<div class="advertencias">
+  <h2>Advertencias / a revisar con el entrenador</h2>
+  <ul>
+    {% for a in advertencias %}
+    <li>{{ a }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<footer class="nota-legal">
+  Este plan es una guía generada automáticamente en base a tu evaluación
+  y objetivo. No reemplaza la consulta con un nutricionista o médico.
+  Cualquier duda, consulta con Isamu.
+</footer>
+
+</body>
+</html>
