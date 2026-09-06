@@ -5,7 +5,13 @@ hacia Supabase (usuarios, evaluaciones, avance_entrenamiento).
 Autenticación: Service Account de Google (JSON), con acceso de
 "Lector" compartido explícitamente sobre el Sheet. El MCP nunca usa
 credenciales de una cuenta personal de Gmail.
+
+GOOGLE_SERVICE_ACCOUNT_JSON puede ser:
+  - una ruta a un archivo .json (uso local, como en desarrollo), o
+  - el contenido JSON completo pegado directo en la variable de
+    entorno (uso en producción, ej. Railway, donde no hay archivo).
 """
+import json
 from functools import lru_cache
 
 from google.oauth2 import service_account
@@ -25,12 +31,26 @@ COLUMNAS_ESPERADAS = [
 ]
 
 
+def _credenciales_service_account(valor: str):
+    """
+    Detecta si 'valor' es contenido JSON directo o una ruta a archivo,
+    y construye las credenciales en cualquiera de los dos casos.
+    """
+    valor_limpio = valor.strip()
+    if valor_limpio.startswith("{"):
+        info = json.loads(valor_limpio)
+        return service_account.Credentials.from_service_account_info(
+            info, scopes=SCOPES
+        )
+    return service_account.Credentials.from_service_account_file(
+        valor_limpio, scopes=SCOPES
+    )
+
+
 @lru_cache(maxsize=1)
 def _servicio_sheets():
     settings = cargar_settings()
-    credenciales = service_account.Credentials.from_service_account_file(
-        settings.google_service_account_json, scopes=SCOPES
-    )
+    credenciales = _credenciales_service_account(settings.google_service_account_json)
     return build("sheets", "v4", credentials=credenciales)
 
 
