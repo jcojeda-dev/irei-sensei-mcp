@@ -17,6 +17,7 @@ Seguridad:
     ruta ejecuta código arbitrario.
 """
 import os
+# Forzar rebuild en Railway (webhook de WhatsApp)
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
