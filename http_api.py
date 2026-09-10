@@ -26,10 +26,12 @@ from tools.plan_alimenticio import generar_plan_alimenticio, generar_pdf_plan
 from tools.usuarios import listar_usuarios, actualizar_membresia
 from tools.whatsapp import enviar_whatsapp
 from tools.recordatorios import revisar_vencimientos
+from whatsapp_webhook import router as whatsapp_webhook_router
 
 MCP_API_SECRET = os.environ["MCP_API_SECRET"]
 
 app = FastAPI(title="Irei Sensei MCP HTTP wrapper")
+app.include_router(whatsapp_webhook_router)
 
 ACCIONES_PERMITIDAS = {
     "sync_sheet_to_db": lambda params: sync_sheet_to_db(),
