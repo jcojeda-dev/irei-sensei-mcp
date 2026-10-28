@@ -11,15 +11,22 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
 
+def _limpiar(valor: str | None) -> str | None:
+    """Quita espacios, saltos de línea y comillas accidentales al pegar."""
+    if valor is None:
+        return None
+    return valor.strip().strip('"').strip("'").strip() or None
+
+
 def _requerida(nombre: str) -> str:
-    valor = os.environ.get(nombre)
+    valor = _limpiar(os.environ.get(nombre))
     if not valor:
         raise RuntimeError(f"Falta la variable de entorno obligatoria: {nombre}")
     return valor
 
 
 def _opcional(nombre: str) -> str | None:
-    return os.environ.get(nombre) or None
+    return _limpiar(os.environ.get(nombre))
 
 
 @dataclass(frozen=True)
