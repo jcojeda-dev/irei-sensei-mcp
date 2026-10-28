@@ -17,7 +17,6 @@ Seguridad:
     ruta ejecuta código arbitrario.
 """
 import os
-# Forzar rebuild en Railway (webhook de WhatsApp)
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
@@ -47,6 +46,12 @@ ACCIONES_PERMITIDAS = {
     ),
     "revisar_vencimientos": lambda params: revisar_vencimientos(),
 }
+
+
+@app.api_route("/health", methods=["GET", "HEAD"])
+def health():
+    """Endpoint público sin datos sensibles, para health check y keep-alive."""
+    return {"status": "ok"}
 
 
 class ToolRequest(BaseModel):
