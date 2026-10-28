@@ -95,14 +95,17 @@ async def recibir_mensaje(request: Request):
         return Response(status_code=200)
 
     client = get_client()
-    usuario = (
+    # Meta envía el número sin "+"; en la base puede estar con o sin "+".
+    solo_digitos = "".join(c for c in whatsapp_remitente if c.isdigit())
+    resultado = (
         client.table("usuarios")
         .select("id, nombre, plan, fecha_vencimiento, estado_membresia")
-        .eq("whatsapp", whatsapp_remitente)
-        .maybe_single()
+        .in_("whatsapp", [solo_digitos, f"+{solo_digitos}"])
+        .limit(1)
         .execute()
-        .data
     )
+    filas = resultado.data if resultado is not None else []
+    usuario = filas[0] if filas else None
 
     if usuario:
         contexto = (
