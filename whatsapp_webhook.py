@@ -141,6 +141,9 @@ async def recibir_mensaje(request: Request):
         "text": {"body": texto_respuesta},
     }
     headers = {"Authorization": f"Bearer {settings.whatsapp_token}"}
-    httpx.post(url, json=payload_envio, headers=headers, timeout=15)
+    envio = httpx.post(url, json=payload_envio, headers=headers, timeout=15)
+    if envio.status_code >= 400:
+        # Solo se registra el error de Meta; nunca el token ni el mensaje.
+        print(f"[whatsapp] Error enviando respuesta: {envio.status_code} {envio.text[:300]}")
 
     return Response(status_code=200)
