@@ -21,6 +21,7 @@ import anthropic
 import httpx
 from fastapi import APIRouter, Request, Response
 
+from avisos import avisar_derivacion
 from config import cargar_settings
 from supabase_client import get_client
 
@@ -47,8 +48,12 @@ Si la pregunta es sobre: salud, lesiones, síntomas, pagos en disputa, \
 quejas, cambios de horario con el entrenador, o cualquier cosa que no \
 puedas responder con los datos dados — NO improvises. Responde algo \
 como: "Buena pregunta, dame un momento que consulto esto con Isamu y \
-te escribo apenas tenga la respuesta." y nada más.
+te escribo apenas tenga la respuesta." y nada más. En ESE caso, empieza \
+tu respuesta exactamente con la marca [DERIVAR] seguida de un espacio \
+(la marca se elimina antes de enviar el mensaje al alumno).
 """
+
+MARCA_DERIVAR = "[DERIVAR]"
 
 
 def _verificar_firma_meta(cuerpo_crudo: bytes, firma_header: str | None) -> bool:
@@ -128,7 +133,9 @@ async def recibir_mensaje(request: Request):
             "content": f"Datos del alumno:\n{contexto}\n\nPregunta del alumno: {texto}",
         }],
     )
-    texto_respuesta = respuesta_ia.content[0].text
+    texto_respuesta = respuesta_ia.content[0].text.strip()
+    derivar = MARCA_DERIVAR in texto_respuesta
+    texto_respuesta = texto_respuesta.replace(MARCA_DERIVAR, "").strip()
 
     url = (
         f"https://graph.facebook.com/v20.0/"
@@ -148,5 +155,25 @@ async def recibir_mensaje(request: Request):
         print(f"[whatsapp] Error enviando respuesta: {envio.status_code} {envio.text[:300]}")
         # Diagnóstico seguro: solo largo y primeros 3 caracteres, nunca el token completo.
         print(f"[whatsapp] token largo={len(token)} inicio={token[:3]!r} phone_id largo={len(settings.whatsapp_phone_number_id or '')}")
+
+    # Guardar la conversación y avisar si hay que derivar (best-effort:
+    # un fallo aquí nunca debe impedir que el alumno ya recibió su respuesta).
+    try:
+        client.table("conversaciones").insert({
+            "usuario_id": usuario["id"] if usuario else None,
+            "whatsapp": solo_digitos,
+            "mensaje_alumno": texto[:2000],
+            "respuesta_ia": texto_respuesta[:2000],
+            "derivar": derivar,
+        }).execute()
+        if derivar:
+            avisar_derivacion(
+                usuario["nombre"] if usuario else None,
+                solo_digitos,
+                texto,
+                texto_respuesta,
+            )
+    except Exception as e:  # noqa: BLE001
+        print(f"[whatsapp] No se pudo guardar la conversación: {type(e).__name__}")
 
     return Response(status_code=200)
