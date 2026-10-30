@@ -7,6 +7,9 @@ de esta lista blanca, previamente aprobadas por Meta. Esto evita que
 un prompt-injection (ej. desde el contenido del Sheet o de Claude)
 logre enviar mensajes arbitrarios a los alumnos.
 """
+import os
+import re
+
 import httpx
 
 from config import cargar_settings
@@ -17,6 +20,12 @@ PLANTILLAS_PERMITIDAS = {
     "recordatorio_5": "membresia_por_vencer_5",
     "plan_enviado": "plan_alimenticio_listo",
 }
+
+
+# Idioma con el que se crearon las plantillas en Meta (es, es_MX, es_ES, es_AR...).
+# Se configura con WHATSAPP_TEMPLATE_LANG; se valida el formato por seguridad.
+_idioma = (os.environ.get("WHATSAPP_TEMPLATE_LANG") or "es").strip()
+CODIGO_IDIOMA = _idioma if re.fullmatch(r"[a-z]{2}(_[A-Z]{2})?", _idioma) else "es"
 
 
 def enviar_whatsapp(usuario_id: str, tipo_mensaje: str) -> dict:
@@ -56,7 +65,7 @@ def enviar_whatsapp(usuario_id: str, tipo_mensaje: str) -> dict:
         "type": "template",
         "template": {
             "name": plantilla,
-            "language": {"code": "es"},
+            "language": {"code": CODIGO_IDIOMA},
             "components": [{
                 "type": "body",
                 "parameters": [{"type": "text", "text": usuario["nombre"]}],
