@@ -66,7 +66,10 @@ def enviar_whatsapp(usuario_id: str, tipo_mensaje: str) -> dict:
     headers = {"Authorization": f"Bearer {settings.whatsapp_token}"}
 
     resp = httpx.post(url, json=payload, headers=headers, timeout=15)
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        # Se incluye la respuesta de Meta (no contiene el token) para poder
+        # diagnosticar plantilla/idioma/número sin adivinar.
+        raise RuntimeError(f"Meta respondió {resp.status_code}: {resp.text[:300]}")
 
     client.table("recordatorios_enviados").insert(
         {"usuario_id": usuario_id, "tipo": tipo_mensaje}

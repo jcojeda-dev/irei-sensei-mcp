@@ -6,16 +6,24 @@ from tools.whatsapp import enviar_whatsapp
 
 VENTANAS = {15: "recordatorio_15", 5: "recordatorio_5"}
 
+# Perú = UTC-5 todo el año. El servidor corre en UTC, así que "hoy" se
+# calcula siempre en hora de Lima para no desfasar los 15/5 días.
+LIMA = dt.timezone(dt.timedelta(hours=-5))
+
+
+def _hoy_lima() -> dt.date:
+    return dt.datetime.now(LIMA).date()
+
 
 def _ya_enviado_hoy(usuario_id: str, tipo: str) -> bool:
-    hoy = dt.date.today().isoformat()
+    inicio_dia_lima = dt.datetime.combine(_hoy_lima(), dt.time.min, tzinfo=LIMA)
     resp = (
         get_client()
         .table("recordatorios_enviados")
         .select("id")
         .eq("usuario_id", usuario_id)
         .eq("tipo", tipo)
-        .gte("fecha_envio", hoy)
+        .gte("fecha_envio", inicio_dia_lima.isoformat())
         .execute()
     )
     return bool(resp.data)
@@ -27,11 +35,13 @@ def revisar_vencimientos() -> dict:
     y envía el recordatorio de WhatsApp correspondiente, evitando
     duplicados el mismo día.
     """
-    hoy = dt.date.today()
+    hoy = _hoy_lima()
     enviados, omitidos, fallidos = [], [], []
+    fechas_buscadas = {}
 
     for dias, tipo in VENTANAS.items():
         fecha_objetivo = (hoy + dt.timedelta(days=dias)).isoformat()
+        fechas_buscadas[tipo] = fecha_objetivo
         usuarios = (
             get_client()
             .table("usuarios")
@@ -50,4 +60,14 @@ def revisar_vencimientos() -> dict:
             except Exception as e:  # no detener el batch por un fallo individual
                 fallidos.append({"usuario_id": u["id"], "error": str(e)})
 
-    return {"enviados": enviados, "omitidos": omitidos, "fallidos": fallidos}
+    print(
+        f"[recordatorios] hoy(Lima)={hoy} buscadas={fechas_buscadas} "
+        f"enviados={len(enviados)} omitidos={len(omitidos)} fallidos={fallidos}"
+    )
+    return {
+        "hoy_lima": hoy.isoformat(),
+        "fechas_buscadas": fechas_buscadas,
+        "enviados": enviados,
+        "omitidos": omitidos,
+        "fallidos": fallidos,
+    }
