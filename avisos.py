@@ -14,6 +14,8 @@ import os
 
 import httpx
 
+from notificaciones import notificar_equipo
+
 _MAX = 800
 
 
@@ -26,6 +28,18 @@ def avisar_derivacion(
     nombre: str | None, whatsapp: str, mensaje: str, respuesta_ia: str
 ) -> None:
     """Best-effort: si falla, solo se registra y NO rompe la respuesta al alumno."""
+    # Telegram primero: es instantáneo y no depende de dominio verificado.
+    try:
+        quien_tg = nombre or "Número no registrado"
+        notificar_equipo(
+            "🔔 Consulta para Isamu\n"
+            f"Alumno: {quien_tg} (+{''.join(c for c in whatsapp if c.isdigit())})\n\n"
+            f"Pregunta: {_recortar(mensaje)}\n\n"
+            f"La IA respondió: {_recortar(respuesta_ia)}"
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[aviso] Telegram falló: {type(e).__name__}")
+
     api_key = (os.environ.get("RESEND_API_KEY") or "").strip()
     destinos = [
         d.strip() for d in (os.environ.get("AVISO_EMAIL_DESTINO") or "").split(",") if d.strip()
