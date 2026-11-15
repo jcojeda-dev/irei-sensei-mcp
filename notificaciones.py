@@ -68,6 +68,41 @@ def enviar_telegram(
     return ok
 
 
+def enviar_documento(
+    chat_id: int, contenido: bytes, nombre_archivo: str, caption: str = ""
+) -> bool:
+    """Sube un PDF directo a Telegram (sin exponer enlaces públicos ni firmados)."""
+    token = _token()
+    if not token:
+        print("[telegram] TELEGRAM_BOT_TOKEN no configurado; no se envía documento")
+        return False
+    if not contenido or len(contenido) > 45 * 1024 * 1024:  # límite de Telegram: 50 MB
+        print("[telegram] documento vacío o demasiado grande")
+        return False
+    try:
+        r = httpx.post(
+            f"{API}/bot{token}/sendDocument",
+            data={"chat_id": str(chat_id), "caption": caption[:1000]},
+            files={"document": (nombre_archivo, contenido, "application/pdf")},
+            timeout=60,
+        )
+        if r.status_code >= 400:
+            print(f"[telegram] sendDocument respondió {r.status_code}: {r.text[:200]}")
+            return False
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[telegram] sendDocument falló: {type(e).__name__}")
+        return False
+
+
+def notificar_equipo_documento(
+    contenido: bytes, nombre_archivo: str, caption: str = ""
+) -> None:
+    """Envía el archivo a todos los IDs autorizados (Isamu y JC). Best-effort."""
+    for chat_id in ids_permitidos():
+        enviar_documento(chat_id, contenido, nombre_archivo, caption)
+
+
 def responder_callback(callback_id: str, texto: str = "") -> None:
     _post("answerCallbackQuery", {"callback_query_id": callback_id, "text": texto[:150]})
 

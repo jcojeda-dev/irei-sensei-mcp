@@ -7,6 +7,7 @@ Herramientas MCP:
 """
 import datetime as dt
 import json
+import re
 from pathlib import Path
 
 import anthropic
@@ -215,5 +216,19 @@ def generar_pdf_plan(usuario_id: str) -> dict:
     client.table("programas_alimenticios").update(
         {"pdf_url": pdf_url}
     ).eq("id", programa["id"]).execute()
+
+    # Copia de respaldo por Telegram a Isamu y JC (best-effort: si falla, el
+    # PDF ya está guardado y el resultado normal no se ve afectado).
+    try:
+        from notificaciones import notificar_equipo_documento
+
+        nombre_seguro = re.sub(r"[^A-Za-z0-9_-]+", "_", usuario["nombre"]).strip("_") or "alumno"
+        notificar_equipo_documento(
+            pdf_bytes,
+            f"Dieta_{nombre_seguro}_{mes_actual[:7]}.pdf",
+            f"Dieta de {usuario['nombre']} - {MESES_ES[mes_actual_date.month - 1]} {mes_actual_date.year}",
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[plan] No se pudo enviar el PDF por Telegram: {type(e).__name__}")
 
     return {"usuario_id": usuario_id, "pdf_url": pdf_url}
