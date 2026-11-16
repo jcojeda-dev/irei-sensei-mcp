@@ -35,6 +35,7 @@ from datetime import date, datetime, timedelta, timezone
 import wa_mensajes
 from notificaciones import notificar_equipo, notificar_equipo_foto, responder_callback
 from supabase_client import get_client
+from tools import perfil_plan
 from tools.leads import normalizar_whatsapp, registrar_contacto_whatsapp
 from tools.sheets import _sumar_meses, agregar_fila, registrar_membresia
 
@@ -702,6 +703,13 @@ def _aprobar(pago_id: str, meses: int) -> str | None:
         f"¡Pago confirmado, {alumno.get('nombre') or ''}! ✅ Tu membresía "
         f"{PLANES[plan][0] if plan in PLANES else ''} está activa hasta el {_fmt(fin)}.{extra} ¡Gracias y a entrenar! 💪",
     )
+    # Cuestionario para armar su dieta y rutina (mejor esfuerzo; no afecta al pago).
+    try:
+        perfil_plan.iniciar(alumno["id"], alumno["whatsapp"], alumno.get("nombre") or "",
+                            pago["tipo"] == "renovacion")
+    except Exception as e:  # noqa: BLE001
+        print(f"[pagos] no se pudo iniciar el cuestionario: {type(e).__name__}")
+
     return (
         f"✅ Pago aprobado: {alumno.get('nombre')} · {meses} mes(es)\n"
         f"Vigente: {_fmt(inicio)} → {_fmt(fin)}\n"

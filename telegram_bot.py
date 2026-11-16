@@ -41,7 +41,7 @@ from notificaciones import (
     responder_callback,
 )
 from supabase_client import ValidacionError, _validar_uuid, get_client
-from tools import pagos
+from tools import pagos, programas
 from tools.plan_alimenticio import BUCKET_PDFS, generar_pdf_plan, generar_plan_alimenticio
 from tools.usuarios import actualizar_membresia
 from tools.whatsapp import enviar_whatsapp
@@ -279,6 +279,20 @@ def _t_proponer_generar_plan(chat_id: int, a: dict) -> dict:
     return _crear_pendiente(chat_id, "generar_plan", {"alumno_id": alumno["id"]}, desc)
 
 
+def _t_proponer_generar_programa(chat_id: int, a: dict) -> dict:
+    alumno = _alumno_por_id(str(a.get("alumno_id", "")))
+    if not alumno:
+        return {"error": "Alumno no encontrado."}
+    indicaciones = str(a.get("indicaciones", ""))[:300]
+    desc = (
+        f"Generar con IA la dieta (con alimentos peruanos) y la rutina de {alumno['nombre']}. "
+        "Recibirás los 2 PDFs con botones para aprobarlos antes de que lleguen al alumno."
+        + (f" Indicaciones: {indicaciones}" if indicaciones else "")
+    )
+    return _crear_pendiente(chat_id, "generar_programa",
+                            {"alumno_id": alumno["id"], "indicaciones": indicaciones}, desc)
+
+
 def _t_proponer_generar_pdf(chat_id: int, a: dict) -> dict:
     alumno = _alumno_por_id(str(a.get("alumno_id", "")))
     if not alumno:
@@ -326,6 +340,7 @@ HERRAMIENTAS = {
     "proponer_enviar_recordatorio": _t_proponer_enviar_recordatorio,
     "proponer_generar_plan": _t_proponer_generar_plan,
     "proponer_generar_pdf": _t_proponer_generar_pdf,
+    "proponer_generar_programa": _t_proponer_generar_programa,
     "proponer_actualizar_membresia": _t_proponer_actualizar_membresia,
 }
 
@@ -355,6 +370,9 @@ ESQUEMAS = [
     {"name": "enviar_pdf_dieta",
      "description": "Envía a este chat el PDF de dieta más reciente de un alumno (si ya fue generado).",
      "input_schema": {"type": "object", "properties": _ID, "required": ["alumno_id"]}},
+    {"name": "proponer_generar_programa",
+     "description": "PROPONE generar con IA la dieta (alimentos peruanos) y la rutina de un alumno. No la genera: pide confirmación con botones; luego llegan los PDFs para revisión. 'indicaciones' es opcional (ej. 'más proteína', 'sin lácteos').",
+     "input_schema": {"type": "object", "properties": {**_ID, "indicaciones": {"type": "string", "maxLength": 300}}, "required": ["alumno_id"]}},
     {"name": "proponer_generar_pdf",
      "description": "PROPONE generar el PDF de la dieta del mes (requiere que ya exista el plan). No lo genera: pide confirmación con botones.",
      "input_schema": {"type": "object", "properties": _ID, "required": ["alumno_id"]}},
@@ -452,6 +470,11 @@ def _ejecutar_accion(accion: str, params: dict) -> str:
     if accion == "generar_plan":
         generar_plan_alimenticio(params["alumno_id"])
         return "Plan del mes generado. El PDF se genera desde el panel admin."
+    if accion == "generar_programa":
+        programas.en_segundo_plano(
+            programas.generar_borrador, params["alumno_id"], "manual", params.get("indicaciones", "")
+        )
+        return "Generando dieta y rutina. En 1–2 minutos te llegan los PDFs con botones para aprobar."
     if accion == "generar_pdf":
         generar_pdf_plan(params["alumno_id"])
         return "PDF generado. Te llegó una copia por Telegram."
@@ -469,6 +492,9 @@ def _resolver_callback(cb: dict) -> None:
 
     if user_id not in ids_permitidos() or chat_id is None:
         responder_callback(cb_id, "No autorizado")
+        return
+    if programas.es_callback_programa(cb.get("data", "")):
+        programas.resolver_callback(cb_id, cb.get("data", ""), chat_id)
         return
     if pagos.es_callback_pago(cb.get("data", "")):
         pagos.resolver_callback(cb_id, cb.get("data", ""), chat_id)

@@ -78,6 +78,31 @@ def enviar_imagen_id(to: str, media_id: str, caption: str = "") -> bool:
     return _enviar(to, {"type": "image", "image": {"id": media_id, "caption": caption[:900]}})
 
 
+def subir_documento(datos: bytes, mime: str = "application/pdf") -> str | None:
+    """Sube un archivo a Meta y devuelve su media_id."""
+    try:
+        token, phone_id = _credenciales()
+        r = httpx.post(
+            f"{GRAPH}/{phone_id}/media",
+            headers={"Authorization": f"Bearer {token}"},
+            data={"messaging_product": "whatsapp", "type": mime},
+            files={"file": ("documento.pdf", datos, mime)},
+            timeout=60,
+        )
+        if r.status_code >= 400:
+            print(f"[whatsapp] subir documento falló: {r.status_code} {r.text[:200]}")
+            return None
+        return r.json().get("id")
+    except Exception as e:  # noqa: BLE001
+        print(f"[whatsapp] subir documento falló: {type(e).__name__}")
+        return None
+
+
+def enviar_documento_id(to: str, media_id: str, nombre_archivo: str, caption: str = "") -> bool:
+    return _enviar(to, {"type": "document", "document": {
+        "id": media_id, "filename": nombre_archivo[:100], "caption": caption[:900]}})
+
+
 def _tipo_imagen(datos: bytes) -> tuple[str, str] | None:
     """(mime, extensión) según los primeros bytes; None si no es una imagen permitida."""
     if datos.startswith(b"\xff\xd8\xff"):

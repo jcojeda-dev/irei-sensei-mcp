@@ -25,7 +25,7 @@ from avisos import avisar_derivacion
 from config import cargar_settings
 from supabase_client import get_client
 from notificaciones import notificar_equipo
-from tools import pagos
+from tools import pagos, perfil_plan
 from tools.leads import mensaje_bienvenida, registrar_contacto_whatsapp
 
 router = APIRouter()
@@ -163,6 +163,13 @@ async def recibir_mensaje(request: Request):
         print(f"[whatsapp] flujo de pagos falló: {type(e).__name__}")
         notificar_equipo(f"⚠️ Falló el flujo de pago de {solo_digitos}. Contáctalo a mano.")
         texto_respuesta = "Tuve un problema técnico con tu solicitud. Isamu te contactará en breve. 🙏"
+
+    # 1b) Cuestionario de dieta/rutina abierto para este alumno.
+    if texto_respuesta is None and usuario is not None:
+        try:
+            texto_respuesta = perfil_plan.procesar(usuario, texto, tipo)
+        except Exception as e:  # noqa: BLE001
+            print(f"[whatsapp] cuestionario falló: {type(e).__name__}")
 
     if texto_respuesta is None and usuario is None:
         # Número que no es alumno: posible interesado nuevo (formulario o botones
