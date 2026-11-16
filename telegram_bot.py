@@ -41,6 +41,7 @@ from notificaciones import (
     responder_callback,
 )
 from supabase_client import ValidacionError, _validar_uuid, get_client
+from tools import pagos
 from tools.plan_alimenticio import BUCKET_PDFS, generar_pdf_plan, generar_plan_alimenticio
 from tools.usuarios import actualizar_membresia
 from tools.whatsapp import enviar_whatsapp
@@ -191,6 +192,11 @@ def _t_ver_interesados(chat_id: int, a: dict) -> dict:
     return {"dias": dias, "interesados": filas}
 
 
+def _t_pagos_pendientes(chat_id: int, a: dict) -> dict:
+    n = pagos.reenviar_pendientes()
+    return {"reenviados": n, "nota": "Las capturas con botones Aprobar/Rechazar llegaron al chat; no repitas su contenido."}
+
+
 def _t_ver_rutina(chat_id: int, a: dict) -> dict:
     _validar_uuid(str(a.get("alumno_id", "")), "alumno_id")
     return {"mensaje": "Todavía no hay rutinas registradas en el sistema (próxima fase)."}
@@ -314,6 +320,7 @@ HERRAMIENTAS = {
     "ver_rutina": _t_ver_rutina,
     "enviar_pdf_dieta": _t_enviar_pdf_dieta,
     "ver_interesados": _t_ver_interesados,
+    "pagos_pendientes": _t_pagos_pendientes,
     "alumnos_por_vencer": _t_alumnos_por_vencer,
     "resumen_general": _t_resumen_general,
     "proponer_enviar_recordatorio": _t_proponer_enviar_recordatorio,
@@ -342,6 +349,9 @@ ESQUEMAS = [
     {"name": "ver_interesados",
      "description": "Personas que pidieron información o evaluación (formulario de la web o WhatsApp) en los últimos N días (1-60). Devuelve nombre, número, programa de interés y objetivo.",
      "input_schema": {"type": "object", "properties": {"dias": {"type": "integer", "minimum": 1, "maximum": 60}}, "required": []}},
+    {"name": "pagos_pendientes",
+     "description": "Vuelve a enviar a este chat las capturas de pago que esperan validación, con sus botones Aprobar/Rechazar. Úsala si Isamu dice que no le llegó un pago o pregunta por pagos pendientes.",
+     "input_schema": {"type": "object", "properties": {}, "required": []}},
     {"name": "enviar_pdf_dieta",
      "description": "Envía a este chat el PDF de dieta más reciente de un alumno (si ya fue generado).",
      "input_schema": {"type": "object", "properties": _ID, "required": ["alumno_id"]}},
@@ -459,6 +469,9 @@ def _resolver_callback(cb: dict) -> None:
 
     if user_id not in ids_permitidos() or chat_id is None:
         responder_callback(cb_id, "No autorizado")
+        return
+    if pagos.es_callback_pago(cb.get("data", "")):
+        pagos.resolver_callback(cb_id, cb.get("data", ""), chat_id)
         return
     m = _CALLBACK_RE.fullmatch(cb.get("data", ""))
     if not m:

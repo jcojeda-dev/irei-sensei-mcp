@@ -24,6 +24,8 @@ from fastapi import APIRouter, Request, Response
 from avisos import avisar_derivacion
 from config import cargar_settings
 from supabase_client import get_client
+from notificaciones import notificar_equipo
+from tools import pagos
 from tools.leads import mensaje_bienvenida, registrar_contacto_whatsapp
 
 router = APIRouter()
@@ -52,9 +54,14 @@ como: "Buena pregunta, dame un momento que consulto esto con Isamu y \
 te escribo apenas tenga la respuesta." y nada más. En ESE caso, empieza \
 tu respuesta exactamente con la marca [DERIVAR] seguida de un espacio \
 (la marca se elimina antes de enviar el mensaje al alumno).
+
+Si la persona quiere adquirir una membresía, inscribirse, renovar o pagar, \
+responde SOLO con la marca [PAGO] (nada más); el sistema se encarga del resto. \
+Nunca des números de cuenta ni montos tú mismo.
 """
 
 MARCA_DERIVAR = "[DERIVAR]"
+MARCA_PAGO = "[PAGO]"
 
 
 def _verificar_firma_meta(cuerpo_crudo: bytes, firma_header: str | None) -> bool:
@@ -68,7 +75,8 @@ def _verificar_firma_meta(cuerpo_crudo: bytes, firma_header: str | None) -> bool
 
 
 def _responder_con_ia(usuario: dict | None, texto: str, settings) -> tuple[str, bool]:
-    """Respuesta de la IA con datos reales del alumno. Devuelve (texto, derivar)."""
+    """Respuesta de la IA con datos reales del alumno. Devuelve (texto, derivar).
+    Si quiere pagar/renovar devuelve (MARCA_PAGO, False)."""
     if usuario:
         contexto = (
             f"Nombre: {usuario['nombre']}\n"
@@ -90,6 +98,8 @@ def _responder_con_ia(usuario: dict | None, texto: str, settings) -> tuple[str, 
         }],
     )
     respuesta = respuesta_ia.content[0].text.strip()
+    if respuesta.startswith(MARCA_PAGO):
+        return MARCA_PAGO, False
     derivar = MARCA_DERIVAR in respuesta
     return respuesta.replace(MARCA_DERIVAR, "").strip(), derivar
 
@@ -119,12 +129,14 @@ async def recibir_mensaje(request: Request):
         cambio = payload["entry"][0]["changes"][0]["value"]
         mensaje = cambio["messages"][0]
         whatsapp_remitente = mensaje["from"]
-        texto = mensaje.get("text", {}).get("body", "")
     except (KeyError, IndexError):
-        # No es un mensaje de texto entrante (puede ser un status update).
+        # No es un mensaje entrante (puede ser un status update).
         return Response(status_code=200)
 
-    if not texto:
+    tipo = mensaje.get("type", "")
+    texto = (mensaje.get("text", {}) or {}).get("body", "") if tipo == "text" else ""
+    media_id = (mensaje.get("image", {}) or {}).get("id") if tipo == "image" else None
+    if tipo not in ("text", "image") or (tipo == "text" and not texto):
         return Response(status_code=200)
 
     client = get_client()
@@ -144,7 +156,15 @@ async def recibir_mensaje(request: Request):
     texto_respuesta = None
     derivar = False
 
-    if usuario is None:
+    # 1) Flujo de pagos (alta nueva / renovación / captura). "" = nada que responder.
+    try:
+        texto_respuesta = pagos.procesar(solo_digitos, usuario, tipo, texto, media_id)
+    except Exception as e:  # noqa: BLE001
+        print(f"[whatsapp] flujo de pagos falló: {type(e).__name__}")
+        notificar_equipo(f"⚠️ Falló el flujo de pago de {solo_digitos}. Contáctalo a mano.")
+        texto_respuesta = "Tuve un problema técnico con tu solicitud. Isamu te contactará en breve. 🙏"
+
+    if texto_respuesta is None and usuario is None:
         # Número que no es alumno: posible interesado nuevo (formulario o botones
         # de la landing). Se registra, se avisa por Telegram y se responde con una
         # bienvenida FIJA (sin IA), para no improvisar con desconocidos.
@@ -157,6 +177,18 @@ async def recibir_mensaje(request: Request):
 
     if texto_respuesta is None:
         texto_respuesta, derivar = _responder_con_ia(usuario, texto, settings)
+        if texto_respuesta == MARCA_PAGO:
+            try:
+                texto_respuesta = pagos.procesar(
+                    solo_digitos, usuario, "text", texto, None, forzar_inicio=True
+                ) or ""
+            except Exception as e:  # noqa: BLE001
+                print(f"[whatsapp] inicio de pago falló: {type(e).__name__}")
+                notificar_equipo(f"⚠️ Falló el flujo de pago de {solo_digitos}. Contáctalo a mano.")
+                texto_respuesta = "Tuve un problema técnico con tu solicitud. Isamu te contactará en breve. 🙏"
+
+    if texto_respuesta == "":
+        return Response(status_code=200)  # mensaje repetido: ya se procesó
 
     url = (
         f"https://graph.facebook.com/v20.0/"
@@ -183,7 +215,7 @@ async def recibir_mensaje(request: Request):
         client.table("conversaciones").insert({
             "usuario_id": usuario["id"] if usuario else None,
             "whatsapp": solo_digitos,
-            "mensaje_alumno": texto[:2000],
+            "mensaje_alumno": (texto or "[imagen]")[:2000],
             "respuesta_ia": texto_respuesta[:2000],
             "derivar": derivar,
         }).execute()

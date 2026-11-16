@@ -3,7 +3,7 @@ Herramienta MCP: sincroniza el Google Sheet de evaluaciones/alumnos
 hacia Supabase (usuarios, evaluaciones, avance_entrenamiento).
 
 Autenticación: Service Account de Google (JSON), con acceso de
-"Lector" compartido explícitamente sobre el Sheet. El MCP nunca usa
+"Editor" compartido explícitamente sobre el Sheet (el bot de pagos agrega filas). El MCP nunca usa
 credenciales de una cuenta personal de Gmail.
 
 GOOGLE_SERVICE_ACCOUNT_JSON puede ser:
@@ -22,7 +22,8 @@ from googleapiclient.discovery import build
 from config import cargar_settings
 from supabase_client import get_client
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+# Lectura y escritura: el Sheet debe estar compartido con la cuenta de servicio como "Editor".
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 # Nombre de la hoja y rango a leer. Ajustar según la plantilla real.
 RANGO = "Alumnos!A1:L"
@@ -239,3 +240,36 @@ def sync_sheet_to_db() -> dict:
         "membresias_actualizadas": len(membresias),
         "errores": errores,
     }
+
+
+def _texto_seguro(valor) -> str:
+    """Evita que un texto de un tercero se interprete como fórmula en el Sheet."""
+    t = "" if valor is None else str(valor)
+    t = "".join(c for c in t if c >= " " or c in "\n")
+    return t.lstrip("=+-@ ").strip()[:500]
+
+
+def agregar_fila(valores: dict) -> None:
+    """
+    Agrega UNA fila al final de la hoja "Alumnos" usando los encabezados de la
+    fila 1 (el orden de columnas no importa; las que no existan se ignoran).
+    Se escribe como texto literal (RAW): nada se evalúa como fórmula.
+    """
+    settings = cargar_settings()
+    servicio = _servicio_sheets()
+    cab = (
+        servicio.spreadsheets().values()
+        .get(spreadsheetId=settings.google_sheet_id, range="Alumnos!1:1")
+        .execute().get("values", [[]])
+    )
+    encabezados = [h.strip().lower() for h in (cab[0] if cab else [])]
+    if "nombre" not in encabezados or "whatsapp" not in encabezados:
+        raise RuntimeError("La hoja Alumnos no tiene encabezados nombre/whatsapp")
+    fila = [_texto_seguro(valores.get(h)) for h in encabezados]
+    servicio.spreadsheets().values().append(
+        spreadsheetId=settings.google_sheet_id,
+        range="Alumnos!A1",
+        valueInputOption="RAW",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [fila]},
+    ).execute()

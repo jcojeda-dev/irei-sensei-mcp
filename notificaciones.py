@@ -12,6 +12,7 @@ token viaja en la URL), solo el tipo de error. Los textos se envían SIN
 parse_mode, así que nada de lo que escriba un tercero se interpreta como
 formato o enlaces ocultos.
 """
+import json
 import os
 
 import httpx
@@ -93,6 +94,52 @@ def enviar_documento(
     except Exception as e:  # noqa: BLE001
         print(f"[telegram] sendDocument falló: {type(e).__name__}")
         return False
+
+
+def enviar_foto(
+    chat_id: int,
+    contenido: bytes,
+    nombre_archivo: str,
+    mime: str,
+    caption: str = "",
+    botones: list[list[dict]] | None = None,
+) -> bool:
+    """Sube una imagen directo a Telegram (con botones opcionales). Si Telegram
+    no la acepta como foto, la envía como documento."""
+    token = _token()
+    if not token or not contenido or len(contenido) > 9 * 1024 * 1024:
+        return False
+    datos = {"chat_id": str(chat_id), "caption": caption[:1000]}
+    if botones:
+        datos["reply_markup"] = json.dumps({"inline_keyboard": botones})
+    for metodo, campo in (("sendPhoto", "photo"), ("sendDocument", "document")):
+        try:
+            r = httpx.post(
+                f"{API}/bot{token}/{metodo}",
+                data=datos,
+                files={campo: (nombre_archivo, contenido, mime)},
+                timeout=60,
+            )
+            if r.status_code < 400:
+                return True
+            print(f"[telegram] {metodo} respondió {r.status_code}: {r.text[:200]}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[telegram] {metodo} falló: {type(e).__name__}")
+    return False
+
+
+def notificar_equipo_foto(
+    contenido: bytes,
+    nombre_archivo: str,
+    mime: str,
+    caption: str = "",
+    botones: list[list[dict]] | None = None,
+) -> bool:
+    """Envía la imagen a Isamu y JC. True si al menos uno la recibió."""
+    algun_ok = False
+    for chat_id in ids_permitidos():
+        algun_ok = enviar_foto(chat_id, contenido, nombre_archivo, mime, caption, botones) or algun_ok
+    return algun_ok
 
 
 def notificar_equipo_documento(
