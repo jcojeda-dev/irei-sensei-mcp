@@ -54,6 +54,30 @@ def enviar_imagen_link(to: str, url: str, caption: str = "") -> bool:
     return _enviar(to, {"type": "image", "image": {"link": url, "caption": caption[:900]}})
 
 
+def subir_imagen(datos: bytes, mime: str) -> str | None:
+    """Sube una imagen a Meta y devuelve su media_id (más fiable que enviar un enlace)."""
+    try:
+        token, phone_id = _credenciales()
+        r = httpx.post(
+            f"{GRAPH}/{phone_id}/media",
+            headers={"Authorization": f"Bearer {token}"},
+            data={"messaging_product": "whatsapp", "type": mime},
+            files={"file": ("qr", datos, mime)},
+            timeout=30,
+        )
+        if r.status_code >= 400:
+            print(f"[whatsapp] subir imagen falló: {r.status_code} {r.text[:200]}")
+            return None
+        return r.json().get("id")
+    except Exception as e:  # noqa: BLE001
+        print(f"[whatsapp] subir imagen falló: {type(e).__name__}")
+        return None
+
+
+def enviar_imagen_id(to: str, media_id: str, caption: str = "") -> bool:
+    return _enviar(to, {"type": "image", "image": {"id": media_id, "caption": caption[:900]}})
+
+
 def _tipo_imagen(datos: bytes) -> tuple[str, str] | None:
     """(mime, extensión) según los primeros bytes; None si no es una imagen permitida."""
     if datos.startswith(b"\xff\xd8\xff"):
