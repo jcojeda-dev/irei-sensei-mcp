@@ -456,11 +456,21 @@ def _enviar_qrs(whatsapp: str) -> list[str]:
     Devuelve las etiquetas que no se pudieron enviar."""
     faltan = []
     storage = get_client().storage.from_(BUCKET_CONFIG)
+    archivos: list[str] = []
     try:
-        archivos = [a["name"] for a in storage.list() if a.get("name")]
+        for a in storage.list():
+            nombre = a.get("name") or ""
+            if not nombre or nombre.startswith("."):
+                continue
+            if "." in nombre:
+                archivos.append(nombre)
+            else:  # carpeta: se mira un nivel adentro
+                for b in storage.list(nombre):
+                    if b.get("name") and "." in b["name"] and not b["name"].startswith("."):
+                        archivos.append(f"{nombre}/{b['name']}")
     except Exception as e:  # noqa: BLE001
         print(f"[pagos] no se pudo listar {BUCKET_CONFIG}: {type(e).__name__}")
-        archivos = []
+    print(f"[pagos] archivos en {BUCKET_CONFIG}: {archivos[:10]}")
     for etiqueta, clave in (("Yape", "yape"), ("Plin", "plin")):
         nombre = next(
             (a for a in archivos if clave in a.lower() and a.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))),
