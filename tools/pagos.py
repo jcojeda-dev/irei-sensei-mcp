@@ -457,25 +457,27 @@ def _enviar_qrs(whatsapp: str) -> list[str]:
     faltan = []
     storage = get_client().storage.from_(BUCKET_CONFIG)
     archivos: list[str] = []
-    try:
-        for a in storage.list():
-            nombre = a.get("name") or ""
+
+    def _recorrer(ruta: str, nivel: int) -> None:
+        # Los archivos traen "id"; las carpetas no. Se baja hasta 3 niveles.
+        for e in storage.list(ruta) if ruta else storage.list():
+            nombre = e.get("name") or ""
             if not nombre or nombre.startswith("."):
                 continue
-            if "." in nombre:
-                archivos.append(nombre)
-            else:  # carpeta: se mira un nivel adentro
-                for b in storage.list(nombre):
-                    if b.get("name") and "." in b["name"] and not b["name"].startswith("."):
-                        archivos.append(f"{nombre}/{b['name']}")
+            completo = f"{ruta}/{nombre}" if ruta else nombre
+            if e.get("id"):
+                archivos.append(completo)
+            elif nivel < 3:
+                _recorrer(completo, nivel + 1)
+
+    try:
+        _recorrer("", 0)
     except Exception as e:  # noqa: BLE001
         print(f"[pagos] no se pudo listar {BUCKET_CONFIG}: {type(e).__name__}")
     print(f"[pagos] archivos en {BUCKET_CONFIG}: {archivos[:10]}")
     for etiqueta, clave in (("Yape", "yape"), ("Plin", "plin")):
-        nombre = next(
-            (a for a in archivos if clave in a.lower() and a.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))),
-            None,
-        )
+        # Cualquier archivo cuya ruta contenga yape/plin; el contenido se valida más abajo.
+        nombre = next((a for a in archivos if clave in a.lower()), None)
         if nombre is None:
             print(f"[pagos] no hay archivo de QR de {etiqueta} en {BUCKET_CONFIG}")
             faltan.append(etiqueta)
