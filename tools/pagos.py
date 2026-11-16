@@ -451,15 +451,12 @@ def _texto_cuentas() -> str | None:
     return bruto.replace("\\n", "\n").replace("|", "\n").strip()
 
 
-def _enviar_qrs(whatsapp: str) -> list[str]:
-    """Envía los QR del bucket privado (archivo cuyo nombre contenga 'yape' / 'plin').
-    Devuelve las etiquetas que no se pudieron enviar."""
-    faltan = []
-    storage = get_client().storage.from_(BUCKET_CONFIG)
+def _listar_archivos(bucket: str) -> list[str]:
+    """Rutas de todos los archivos de un bucket (hasta 3 niveles de carpetas)."""
+    storage = get_client().storage.from_(bucket)
     archivos: list[str] = []
 
     def _recorrer(ruta: str, nivel: int) -> None:
-        # Los archivos traen "id"; las carpetas no. Se baja hasta 3 niveles.
         for e in storage.list(ruta) if ruta else storage.list():
             nombre = e.get("name") or ""
             if not nombre or nombre.startswith("."):
@@ -473,17 +470,48 @@ def _enviar_qrs(whatsapp: str) -> list[str]:
     try:
         _recorrer("", 0)
     except Exception as e:  # noqa: BLE001
-        print(f"[pagos] no se pudo listar {BUCKET_CONFIG}: {type(e).__name__}")
-    print(f"[pagos] archivos en {BUCKET_CONFIG}: {archivos[:10]}")
-    for etiqueta, clave in (("Yape", "yape"), ("Plin", "plin")):
-        # Cualquier archivo cuya ruta contenga yape/plin; el contenido se valida más abajo.
-        nombre = next((a for a in archivos if clave in a.lower()), None)
-        if nombre is None:
-            print(f"[pagos] no hay archivo de QR de {etiqueta} en {BUCKET_CONFIG}")
+        print(f"[pagos] no se pudo listar el bucket {bucket}: {type(e).__name__}")
+    return archivos
+
+
+def _buscar_qr() -> dict[str, tuple[str, str]]:
+    """{'Yape': (bucket, ruta), 'Plin': (...)}. Busca en pagos-config y, si no están,
+    en buckets cuyo nombre parezca de pagos/QR/config (nunca en comprobantes)."""
+    candidatos = [BUCKET_CONFIG]
+    try:
+        ids = [b.id if hasattr(b, "id") else b.get("id") for b in get_client().storage.list_buckets()]
+        print(f"[pagos] buckets existentes: {ids}")
+        candidatos += [
+            i for i in ids
+            if i and i != BUCKET_CONFIG and i != BUCKET_COMPROBANTES
+            and any(k in i.lower() for k in ("pago", "qr", "config", "yape", "plin"))
+        ]
+    except Exception as e:  # noqa: BLE001
+        print(f"[pagos] no se pudo listar buckets: {type(e).__name__}")
+    hallados: dict[str, tuple[str, str]] = {}
+    for bucket in candidatos:
+        archivos = _listar_archivos(bucket)
+        print(f"[pagos] archivos en {bucket}: {archivos[:10]}")
+        for etiqueta, clave in (("Yape", "yape"), ("Plin", "plin")):
+            if etiqueta not in hallados:
+                ruta = next((a for a in archivos if clave in a.lower()), None)
+                if ruta:
+                    hallados[etiqueta] = (bucket, ruta)
+    return hallados
+
+
+def _enviar_qrs(whatsapp: str) -> list[str]:
+    """Envía los QR de Yape y Plin. Devuelve las etiquetas que no se pudieron enviar."""
+    faltan = []
+    hallados = _buscar_qr()
+    for etiqueta in ("Yape", "Plin"):
+        if etiqueta not in hallados:
+            print(f"[pagos] no hay archivo de QR de {etiqueta}")
             faltan.append(etiqueta)
             continue
+        bucket, ruta = hallados[etiqueta]
         try:
-            datos = storage.download(nombre)
+            datos = get_client().storage.from_(bucket).download(ruta)
             tipo = wa_mensajes._tipo_imagen(datos)
             if tipo is None:
                 print(f"[pagos] el QR de {etiqueta} no es JPG/PNG/WEBP válido")
