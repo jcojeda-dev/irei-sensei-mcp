@@ -107,7 +107,12 @@ def responder_callback(callback_id: str, texto: str = "") -> None:
     _post("answerCallbackQuery", {"callback_query_id": callback_id, "text": texto[:150]})
 
 
-def notificar_equipo(texto: str) -> None:
-    """Avisa a todos los IDs autorizados (Isamu y JC). Best-effort."""
+def notificar_equipo(texto: str, botones: list[list[dict]] | None = None) -> bool:
+    """
+    Avisa a todos los IDs autorizados (Isamu y JC). Best-effort.
+    Devuelve True si al menos una persona recibió el aviso.
+    """
+    algun_ok = False
     for chat_id in ids_permitidos():
-        enviar_telegram(chat_id, texto)
+        algun_ok = enviar_telegram(chat_id, texto, botones=botones) or algun_ok
+    return algun_ok

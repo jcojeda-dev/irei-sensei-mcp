@@ -26,6 +26,8 @@ from tools.plan_alimenticio import generar_plan_alimenticio, generar_pdf_plan
 from tools.usuarios import listar_usuarios, actualizar_membresia
 from tools.whatsapp import enviar_whatsapp
 from tools.recordatorios import revisar_vencimientos
+from tools.documentos import notificar_documento_subido
+from tools.leads import notificar_lead
 from whatsapp_webhook import router as whatsapp_webhook_router
 from telegram_bot import router as telegram_router
 
@@ -47,6 +49,10 @@ ACCIONES_PERMITIDAS = {
         params["usuario_id"], params["tipo_mensaje"]
     ),
     "revisar_vencimientos": lambda params: revisar_vencimientos(),
+    "notificar_documento_subido": lambda params: notificar_documento_subido(
+        params["documento_id"]
+    ),
+    "notificar_lead": lambda params: notificar_lead(params["lead_id"]),
 }
 
 
@@ -61,6 +67,8 @@ class ToolRequest(BaseModel):
     filtro_estado: str | None = None
     nueva_fecha_vencimiento: str | None = None
     tipo_mensaje: str | None = None
+    documento_id: str | None = None
+    lead_id: str | None = None
 
 
 def _verificar_secreto(x_mcp_secret: str | None):

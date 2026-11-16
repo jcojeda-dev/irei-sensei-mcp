@@ -24,6 +24,7 @@ from fastapi import APIRouter, Request, Response
 from avisos import avisar_derivacion
 from config import cargar_settings
 from supabase_client import get_client
+from tools.leads import mensaje_bienvenida, registrar_contacto_whatsapp
 
 router = APIRouter()
 
@@ -64,6 +65,33 @@ def _verificar_firma_meta(cuerpo_crudo: bytes, firma_header: str | None) -> bool
     ).hexdigest()
     firma_recibida = firma_header.removeprefix("sha256=")
     return hmac.compare_digest(firma_esperada, firma_recibida)
+
+
+def _responder_con_ia(usuario: dict | None, texto: str, settings) -> tuple[str, bool]:
+    """Respuesta de la IA con datos reales del alumno. Devuelve (texto, derivar)."""
+    if usuario:
+        contexto = (
+            f"Nombre: {usuario['nombre']}\n"
+            f"Plan: {usuario.get('plan') or 'sin plan asignado'}\n"
+            f"Estado de membresía: {usuario['estado_membresia']}\n"
+            f"Fecha de vencimiento: {usuario.get('fecha_vencimiento') or 'no registrada'}"
+        )
+    else:
+        contexto = "No se encontró a este número en la base de alumnos."
+
+    client_ai = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    respuesta_ia = client_ai.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=300,
+        system=PROMPT_SISTEMA,
+        messages=[{
+            "role": "user",
+            "content": f"Datos del alumno:\n{contexto}\n\nPregunta del alumno: {texto}",
+        }],
+    )
+    respuesta = respuesta_ia.content[0].text.strip()
+    derivar = MARCA_DERIVAR in respuesta
+    return respuesta.replace(MARCA_DERIVAR, "").strip(), derivar
 
 
 @router.get("/webhook/whatsapp")
@@ -112,30 +140,23 @@ async def recibir_mensaje(request: Request):
     filas = resultado.data if resultado is not None else []
     usuario = filas[0] if filas else None
 
-    if usuario:
-        contexto = (
-            f"Nombre: {usuario['nombre']}\n"
-            f"Plan: {usuario.get('plan') or 'sin plan asignado'}\n"
-            f"Estado de membresía: {usuario['estado_membresia']}\n"
-            f"Fecha de vencimiento: {usuario.get('fecha_vencimiento') or 'no registrada'}"
-        )
-    else:
-        contexto = "No se encontró a este número en la base de alumnos."
-
     settings = cargar_settings()
-    client_ai = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    respuesta_ia = client_ai.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=300,
-        system=PROMPT_SISTEMA,
-        messages=[{
-            "role": "user",
-            "content": f"Datos del alumno:\n{contexto}\n\nPregunta del alumno: {texto}",
-        }],
-    )
-    texto_respuesta = respuesta_ia.content[0].text.strip()
-    derivar = MARCA_DERIVAR in texto_respuesta
-    texto_respuesta = texto_respuesta.replace(MARCA_DERIVAR, "").strip()
+    texto_respuesta = None
+    derivar = False
+
+    if usuario is None:
+        # Número que no es alumno: posible interesado nuevo (formulario o botones
+        # de la landing). Se registra, se avisa por Telegram y se responde con una
+        # bienvenida FIJA (sin IA), para no improvisar con desconocidos.
+        try:
+            contacto = registrar_contacto_whatsapp(solo_digitos, texto)
+            if contacto.get("bienvenida"):
+                texto_respuesta = mensaje_bienvenida(contacto.get("nombre"))
+        except Exception as e:  # noqa: BLE001
+            print(f"[whatsapp] No se pudo registrar el contacto: {type(e).__name__}")
+
+    if texto_respuesta is None:
+        texto_respuesta, derivar = _responder_con_ia(usuario, texto, settings)
 
     url = (
         f"https://graph.facebook.com/v20.0/"

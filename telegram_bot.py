@@ -176,6 +176,21 @@ def _t_enviar_pdf_dieta(chat_id: int, a: dict) -> dict:
     return {"enviado": ok, "nota": "El archivo llegó directamente al chat; no repitas su contenido."}
 
 
+def _t_ver_interesados(chat_id: int, a: dict) -> dict:
+    try:
+        dias = max(1, min(int(a.get("dias", 7)), 60))
+    except (TypeError, ValueError):
+        dias = 7
+    desde = (datetime.now(timezone.utc) - timedelta(days=dias)).isoformat()
+    filas = (
+        get_client().table("leads")
+        .select("nombre, whatsapp, programa, objetivo, origen, llego_por_whatsapp, creado_en")
+        .gte("creado_en", desde).order("creado_en", desc=True).limit(20)
+        .execute().data
+    )
+    return {"dias": dias, "interesados": filas}
+
+
 def _t_ver_rutina(chat_id: int, a: dict) -> dict:
     _validar_uuid(str(a.get("alumno_id", "")), "alumno_id")
     return {"mensaje": "Todavía no hay rutinas registradas en el sistema (próxima fase)."}
@@ -298,6 +313,7 @@ HERRAMIENTAS = {
     "ver_dieta": _t_ver_dieta,
     "ver_rutina": _t_ver_rutina,
     "enviar_pdf_dieta": _t_enviar_pdf_dieta,
+    "ver_interesados": _t_ver_interesados,
     "alumnos_por_vencer": _t_alumnos_por_vencer,
     "resumen_general": _t_resumen_general,
     "proponer_enviar_recordatorio": _t_proponer_enviar_recordatorio,
@@ -323,6 +339,9 @@ ESQUEMAS = [
     {"name": "ver_rutina",
      "description": "Rutina de entrenamiento de un alumno.",
      "input_schema": {"type": "object", "properties": _ID, "required": ["alumno_id"]}},
+    {"name": "ver_interesados",
+     "description": "Personas que pidieron información o evaluación (formulario de la web o WhatsApp) en los últimos N días (1-60). Devuelve nombre, número, programa de interés y objetivo.",
+     "input_schema": {"type": "object", "properties": {"dias": {"type": "integer", "minimum": 1, "maximum": 60}}, "required": []}},
     {"name": "enviar_pdf_dieta",
      "description": "Envía a este chat el PDF de dieta más reciente de un alumno (si ya fue generado).",
      "input_schema": {"type": "object", "properties": _ID, "required": ["alumno_id"]}},

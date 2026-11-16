@@ -91,10 +91,20 @@ def revisar_vencimientos() -> dict:
         f"enviados={len(enviados)} omitidos={len(omitidos)} fallidos={fallidos}"
     )
     _avisar_resumen_telegram(enviados, fallidos)
+
+    # Aprovecha el cron diario para reenviar avisos de interesados que no salieron.
+    reintentos = {}
+    try:
+        from tools.leads import reintentar_avisos_pendientes
+
+        reintentos = reintentar_avisos_pendientes()
+    except Exception as e:  # noqa: BLE001
+        print(f"[recordatorios] reintento de avisos de leads falló: {type(e).__name__}")
     return {
         "hoy_lima": hoy.isoformat(),
         "fechas_buscadas": fechas_buscadas,
         "enviados": enviados,
         "omitidos": omitidos,
         "fallidos": fallidos,
+        "avisos_leads_reintentados": reintentos,
     }
