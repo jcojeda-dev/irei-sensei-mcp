@@ -13,6 +13,7 @@ GOOGLE_SERVICE_ACCOUNT_JSON puede ser:
 """
 import calendar
 import json
+import re
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 
@@ -26,13 +27,15 @@ from supabase_client import get_client
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 # Nombre de la hoja y rango a leer. Ajustar según la plantilla real.
-RANGO = "Alumnos!A1:L"
+HOJA = "Alumnos"
+RANGO = "Alumnos!A1:Z"
 
 # Se leen por NOMBRE de encabezado (el orden de las columnas no importa).
 COLUMNAS_ESPERADAS = [
     "nombre", "whatsapp", "email", "plan",
     "peso_kg", "porcentaje_grasa", "objetivo", "notas",
-    "fecha_medicion", "fecha_inicio", "meses", "fecha_fin",
+    "fecha_medicion", "fecha_inicio", "fecha_renovacion", "meses", "fecha_fin",
+    # "sesiones" y "precio" son FÓRMULAS del Sheet: el servidor no las lee ni las escribe.
 ]
 
 
@@ -137,7 +140,8 @@ def _hoy_lima() -> date:
 
 def _membresia_de_fila(fila: dict) -> tuple[date | None, date | None]:
     """Devuelve (fecha_inicio, fecha_fin). La fecha fin se calcula si falta."""
-    inicio = _a_fecha(fila.get("fecha_inicio", ""))
+    # Inicio del periodo vigente: la renovación (si existe) manda sobre el inicio original.
+    inicio = _a_fecha(fila.get("fecha_renovacion", "")) or _a_fecha(fila.get("fecha_inicio", ""))
     fin = _a_fecha(fila.get("fecha_fin", ""))
     meses_txt = (fila.get("meses") or "").strip()
     if fin is None and inicio is not None and meses_txt:
@@ -249,27 +253,149 @@ def _texto_seguro(valor) -> str:
     return t.lstrip("=+-@ ").strip()[:500]
 
 
-def agregar_fila(valores: dict) -> None:
-    """
-    Agrega UNA fila al final de la hoja "Alumnos" usando los encabezados de la
-    fila 1 (el orden de columnas no importa; las que no existan se ignoran).
-    Se escribe como texto literal (RAW): nada se evalúa como fórmula.
-    """
-    settings = cargar_settings()
-    servicio = _servicio_sheets()
-    cab = (
-        servicio.spreadsheets().values()
-        .get(spreadsheetId=settings.google_sheet_id, range="Alumnos!1:1")
-        .execute().get("values", [[]])
+def _letra(indice: int) -> str:
+    """0 -> A, 25 -> Z, 26 -> AA."""
+    n, letras = indice + 1, ""
+    while n:
+        n, r = divmod(n - 1, 26)
+        letras = chr(65 + r) + letras
+    return letras
+
+
+def _leer_hoja() -> tuple[list[str], list[list[str]]]:
+    """(encabezados en minúscula, filas de datos). Fila de datos i está en la fila i+2 del Sheet."""
+    valores = (
+        _servicio_sheets().spreadsheets().values()
+        .get(spreadsheetId=cargar_settings().google_sheet_id, range=RANGO)
+        .execute().get("values", [])
     )
-    encabezados = [h.strip().lower() for h in (cab[0] if cab else [])]
-    if "nombre" not in encabezados or "whatsapp" not in encabezados:
+    if not valores:
+        raise RuntimeError("La hoja Alumnos está vacía")
+    cab = [h.strip().lower() for h in valores[0]]
+    if "nombre" not in cab or "whatsapp" not in cab:
         raise RuntimeError("La hoja Alumnos no tiene encabezados nombre/whatsapp")
-    fila = [_texto_seguro(valores.get(h)) for h in encabezados]
-    servicio.spreadsheets().values().append(
-        spreadsheetId=settings.google_sheet_id,
-        range="Alumnos!A1",
-        valueInputOption="RAW",
+    return cab, valores[1:]
+
+
+def buscar_fila_alumno(whatsapp: str) -> int | None:
+    """
+    Número de fila (1 = encabezados) donde está la MEMBRESÍA del alumno: la última
+    fila de ese número que tenga plan; si ninguna tiene, la primera de ese número.
+    Las filas que solo traen mediciones no se tocan.
+    """
+    cab, filas = _leer_hoja()
+    i_wa, i_plan = cab.index("whatsapp"), cab.index("plan") if "plan" in cab else None
+    con_plan, cualquiera = None, None
+    for n, f in enumerate(filas, start=2):
+        if _normalizar_whatsapp(f[i_wa] if i_wa < len(f) else "") != whatsapp:
+            continue
+        cualquiera = cualquiera or n
+        if i_plan is not None and i_plan < len(f) and f[i_plan].strip():
+            con_plan = n
+    return con_plan or cualquiera
+
+
+def actualizar_fila(numero: int, valores: dict) -> None:
+    """Cambia SOLO las celdas indicadas (por encabezado) de una fila existente."""
+    cab, _ = _leer_hoja()
+    datos = [
+        {"range": f"{HOJA}!{_letra(cab.index(k))}{numero}", "values": [[_texto_seguro(v)]]}
+        for k, v in valores.items() if k in cab
+    ]
+    if not datos:
+        return
+    _servicio_sheets().spreadsheets().values().batchUpdate(
+        spreadsheetId=cargar_settings().google_sheet_id,
+        body={"valueInputOption": "USER_ENTERED", "data": datos},
+    ).execute()
+
+
+def _copiar_formulas(numero: int, cab: list[str]) -> None:
+    """Copia las fórmulas de sesiones/precio de la fila de arriba a la fila nueva (mejor esfuerzo)."""
+    if numero < 3:
+        return
+    servicio, sid = _servicio_sheets(), cargar_settings().google_sheet_id
+    columnas = [cab.index(c) for c in ("sesiones", "precio") if c in cab]
+    if not columnas:
+        return
+    hojas = servicio.spreadsheets().get(
+        spreadsheetId=sid, fields="sheets(properties(sheetId,title))"
+    ).execute()["sheets"]
+    hoja_id = next(h["properties"]["sheetId"] for h in hojas if h["properties"]["title"] == HOJA)
+    peticiones = []
+    for col in columnas:
+        celda = f"{HOJA}!{_letra(col)}{numero - 1}"
+        v = (
+            servicio.spreadsheets().values()
+            .get(spreadsheetId=sid, range=celda, valueRenderOption="FORMULA")
+            .execute().get("values", [[""]])
+        )
+        if not (v and v[0] and str(v[0][0]).startswith("=")):
+            continue  # no es fórmula: no se copia un valor ajeno
+        peticiones.append({"copyPaste": {
+            "source": {"sheetId": hoja_id, "startRowIndex": numero - 2, "endRowIndex": numero - 1,
+                       "startColumnIndex": col, "endColumnIndex": col + 1},
+            "destination": {"sheetId": hoja_id, "startRowIndex": numero - 1, "endRowIndex": numero,
+                            "startColumnIndex": col, "endColumnIndex": col + 1},
+            "pasteType": "PASTE_FORMULA",
+        }})
+    if peticiones:
+        servicio.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": peticiones}).execute()
+
+
+def agregar_fila(valores: dict) -> int:
+    """
+    Agrega UNA fila al final de "Alumnos" por encabezado (las columnas que no
+    existan se ignoran; sesiones y precio no se escriben: son fórmulas).
+    Devuelve el número de fila creado.
+    """
+    cab, _ = _leer_hoja()
+    fila = [
+        "" if h in ("sesiones", "precio") else _texto_seguro(valores.get(h))
+        for h in cab
+    ]
+    r = _servicio_sheets().spreadsheets().values().append(
+        spreadsheetId=cargar_settings().google_sheet_id,
+        range=f"{HOJA}!A1",
+        valueInputOption="USER_ENTERED",
         insertDataOption="INSERT_ROWS",
         body={"values": [fila]},
     ).execute()
+    rango = r.get("updates", {}).get("updatedRange", "")  # "Alumnos!A57:O57"
+    m = re.search(r"![A-Z]+(\d+)", rango)
+    numero = int(m.group(1)) if m else 0
+    if numero:
+        try:
+            _copiar_formulas(numero, cab)
+        except Exception as e:  # noqa: BLE001
+            print(f"[sheets] no se pudieron copiar las fórmulas: {type(e).__name__}")
+    return numero
+
+
+def registrar_membresia(
+    whatsapp: str, nombre: str, email: str | None, plan: str,
+    inicio: date, meses: int, fin: date, renovacion: bool,
+) -> str:
+    """
+    Escribe la membresía de un pago aprobado, sin perder el historial:
+      - alta: fecha_inicio = inicio del periodo;
+      - renovación: fecha_inicio NO se toca; fecha_renovacion = inicio del nuevo periodo.
+    Siempre actualiza plan, meses y fecha_fin. Devuelve "actualizada" o "agregada".
+    """
+    whatsapp = _normalizar_whatsapp(whatsapp) or whatsapp
+    numero = buscar_fila_alumno(whatsapp)
+    if numero:
+        cab, filas = _leer_hoja()
+        actual = dict(zip(cab, filas[numero - 2] + [""] * len(cab)))
+        cambios = {"plan": plan, "meses": meses, "fecha_fin": fin.isoformat()}
+        if renovacion and (actual.get("fecha_inicio") or "").strip():
+            cambios["fecha_renovacion"] = inicio.isoformat()
+        else:
+            cambios["fecha_inicio"] = inicio.isoformat()
+        actualizar_fila(numero, cambios)
+        return "actualizada"
+    agregar_fila({
+        "nombre": nombre, "whatsapp": whatsapp, "email": email, "plan": plan,
+        "fecha_inicio": inicio.isoformat(), "meses": meses, "fecha_fin": fin.isoformat(),
+    })
+    return "agregada"

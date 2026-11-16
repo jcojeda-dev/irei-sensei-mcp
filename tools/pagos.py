@@ -34,7 +34,7 @@ import wa_mensajes
 from notificaciones import notificar_equipo, notificar_equipo_foto, responder_callback
 from supabase_client import get_client
 from tools.leads import normalizar_whatsapp, registrar_contacto_whatsapp
-from tools.sheets import _sumar_meses, agregar_fila
+from tools.sheets import _sumar_meses, agregar_fila, registrar_membresia
 
 BUCKET_COMPROBANTES = "comprobantes"
 BUCKET_CONFIG = "pagos-config"
@@ -336,7 +336,7 @@ def _registrar_alumno(p: dict) -> str:
     try:
         agregar_fila({
             "nombre": p["nombre"], "whatsapp": p["whatsapp"], "email": p["email"],
-            "plan": p["plan"], "objetivo": p["objetivo"], "notas": notas,
+            "plan": PLANES[p["plan"]][0], "objetivo": p["objetivo"], "notas": notas,
             "fecha_medicion": _hoy_lima().isoformat(),
         })
     except Exception as e:  # noqa: BLE001
@@ -541,10 +541,11 @@ def _aprobar(pago_id: str, meses: int) -> str | None:
 
     sheet_ok = True
     try:
-        agregar_fila({
-            "nombre": alumno.get("nombre"), "whatsapp": alumno["whatsapp"], "email": alumno.get("email"),
-            "plan": plan, "fecha_inicio": inicio.isoformat(), "meses": meses, "fecha_fin": fin.isoformat(),
-        })
+        registrar_membresia(
+            whatsapp=alumno["whatsapp"], nombre=alumno.get("nombre") or "", email=alumno.get("email"),
+            plan=PLANES[plan][0] if plan in PLANES else "", inicio=inicio, meses=meses, fin=fin,
+            renovacion=pago["tipo"] == "renovacion",
+        )
     except Exception as e:  # noqa: BLE001
         sheet_ok = False
         print(f"[pagos] Sheet (membresía) falló: {type(e).__name__}")
