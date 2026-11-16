@@ -14,6 +14,7 @@ GOOGLE_SERVICE_ACCOUNT_JSON puede ser:
 import calendar
 import json
 import re
+import threading
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 
@@ -343,33 +344,46 @@ def _copiar_formulas(numero: int, cab: list[str]) -> None:
         servicio.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": peticiones}).execute()
 
 
+_candado_hoja = threading.Lock()
+
+
+def _siguiente_fila_libre(cab: list[str], filas: list[list[str]]) -> int:
+    """Fila (1 = encabezados) justo debajo de la última fila con nombre o WhatsApp.
+    No depende de filas pre-formateadas ni de desplegables vacíos más abajo."""
+    claves = [cab.index("nombre"), cab.index("whatsapp")]
+    ultimo = 1
+    for n, f in enumerate(filas, start=2):
+        if any(i < len(f) and f[i].strip() for i in claves):
+            ultimo = n
+    return ultimo + 1
+
+
 def agregar_fila(valores: dict) -> int:
     """
-    Agrega UNA fila al final de "Alumnos" por encabezado (las columnas que no
-    existan se ignoran; sesiones y precio no se escriben: son fórmulas).
-    Devuelve el número de fila creado.
+    Escribe UNA fila nueva justo debajo de la última fila con datos de "Alumnos",
+    celda por celda según los encabezados. Solo toca las celdas con valor: no borra
+    desplegables ni fórmulas. sesiones y precio no se escriben (son fórmulas del
+    Sheet): se copian desde la fila de arriba. Devuelve el número de fila.
     """
-    cab, _ = _leer_hoja()
-    fila = [
-        "" if h in ("sesiones", "precio") else _texto_seguro(valores.get(h))
-        for h in cab
-    ]
-    r = _servicio_sheets().spreadsheets().values().append(
-        spreadsheetId=cargar_settings().google_sheet_id,
-        range=f"{HOJA}!A1",
-        valueInputOption="USER_ENTERED",
-        insertDataOption="INSERT_ROWS",
-        body={"values": [fila]},
-    ).execute()
-    rango = r.get("updates", {}).get("updatedRange", "")  # "Alumnos!A57:O57"
-    m = re.search(r"![A-Z]+(\d+)", rango)
-    numero = int(m.group(1)) if m else 0
-    if numero:
+    with _candado_hoja:  # dos altas simultáneas no pisan la misma fila
+        cab, filas = _leer_hoja()
+        numero = _siguiente_fila_libre(cab, filas)
+        datos = []
+        for h in cab:
+            if h in ("sesiones", "precio"):
+                continue
+            v = _texto_seguro(valores.get(h))
+            if v:
+                datos.append({"range": f"{HOJA}!{_letra(cab.index(h))}{numero}", "values": [[v]]})
+        _servicio_sheets().spreadsheets().values().batchUpdate(
+            spreadsheetId=cargar_settings().google_sheet_id,
+            body={"valueInputOption": "USER_ENTERED", "data": datos},
+        ).execute()
         try:
             _copiar_formulas(numero, cab)
         except Exception as e:  # noqa: BLE001
             print(f"[sheets] no se pudieron copiar las fórmulas: {type(e).__name__}")
-    return numero
+        return numero
 
 
 def registrar_membresia(
