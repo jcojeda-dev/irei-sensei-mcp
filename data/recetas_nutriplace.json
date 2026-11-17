@@ -1,0 +1,405 @@
+{
+ "fuente": "NutriPlace (catálogo del entrenador, extraído el 16/11/2026). No incluye ingredientes ni macros: solo nombre, categoría, tiempo, porciones y kcal.",
+ "recetas": [
+  {
+   "id": 1,
+   "nombre": "Yogurt con granola",
+   "categoria": "Meriendas/Snacks",
+   "minutos": 2,
+   "porciones": 1,
+   "kcal": 212
+  },
+  {
+   "id": 2,
+   "nombre": "Pollo saltado c/ arroz y papa",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 491
+  },
+  {
+   "id": 3,
+   "nombre": "Pollo saltado c/ papas air fryer",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 406
+  },
+  {
+   "id": 4,
+   "nombre": "Lomo saltado c/ arroz y papa",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 476
+  },
+  {
+   "id": 5,
+   "nombre": "Lomo saltado c/ papas air fryer",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 391
+  },
+  {
+   "id": 6,
+   "nombre": "Pollo al horno c/puré y arroz",
+   "categoria": "Principales",
+   "minutos": 40,
+   "porciones": 1,
+   "kcal": 584
+  },
+  {
+   "id": 7,
+   "nombre": "Pollo a la plancha c/lenteja y ensalada",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 394
+  },
+  {
+   "id": 8,
+   "nombre": "Pollo a la plancha c/camote y ensalada",
+   "categoria": "Principales",
+   "minutos": 16,
+   "porciones": 1,
+   "kcal": 371
+  },
+  {
+   "id": 9,
+   "nombre": "Pollo a la plancha c/papa y ensalada",
+   "categoria": "Principales",
+   "minutos": 16,
+   "porciones": 1,
+   "kcal": 367
+  },
+  {
+   "id": 10,
+   "nombre": "Pollo a la plancha c/arroz y ensalada",
+   "categoria": "Principales",
+   "minutos": 12,
+   "porciones": 1,
+   "kcal": 400
+  },
+  {
+   "id": 11,
+   "nombre": "Pollo a la plancha c/ensalada",
+   "categoria": "Principales",
+   "minutos": 12,
+   "porciones": 1,
+   "kcal": 231
+  },
+  {
+   "id": 12,
+   "nombre": "Tallarines verdes con pollo",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 558
+  },
+  {
+   "id": 13,
+   "nombre": "Tallarines verdes con carne",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 543
+  },
+  {
+   "id": 14,
+   "nombre": "Locro de zapallo con arroz",
+   "categoria": "Principales",
+   "minutos": 20,
+   "porciones": 1,
+   "kcal": 503
+  },
+  {
+   "id": 15,
+   "nombre": "Ají de gallina",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 660
+  },
+  {
+   "id": 16,
+   "nombre": "Ají de gallina saludable",
+   "categoria": "Principales",
+   "minutos": 20,
+   "porciones": 1,
+   "kcal": 475
+  },
+  {
+   "id": 17,
+   "nombre": "Tortilla de papa y verduras",
+   "categoria": "Principales",
+   "minutos": 20,
+   "porciones": 1,
+   "kcal": 464
+  },
+  {
+   "id": 18,
+   "nombre": "Salpicón de atún con choclo",
+   "categoria": "Principales",
+   "minutos": 15,
+   "porciones": 1,
+   "kcal": 240
+  },
+  {
+   "id": 19,
+   "nombre": "Wrap de atún",
+   "categoria": "Principales",
+   "minutos": 5,
+   "porciones": 1,
+   "kcal": 338
+  },
+  {
+   "id": 20,
+   "nombre": "Arroz chaufa de pollo",
+   "categoria": "Principales",
+   "minutos": 12,
+   "porciones": 1,
+   "kcal": 500
+  },
+  {
+   "id": 21,
+   "nombre": "Arroz con pollo",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 329
+  },
+  {
+   "id": 22,
+   "nombre": "Tallarines rojos con carne",
+   "categoria": "Principales",
+   "minutos": 23,
+   "porciones": 1,
+   "kcal": 358
+  },
+  {
+   "id": 23,
+   "nombre": "Tallarines rojos con atún",
+   "categoria": "Principales",
+   "minutos": 13,
+   "porciones": 1,
+   "kcal": 353
+  },
+  {
+   "id": 24,
+   "nombre": "Tallarines rojos con pollo",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 383
+  },
+  {
+   "id": 25,
+   "nombre": "Mousse proteico con fruta",
+   "categoria": "Principales",
+   "minutos": 12,
+   "porciones": 1,
+   "kcal": 417
+  },
+  {
+   "id": 26,
+   "nombre": "Brochetas de pollo",
+   "categoria": "Principales",
+   "minutos": 10,
+   "porciones": 1,
+   "kcal": 200
+  },
+  {
+   "id": 27,
+   "nombre": "Ceviche de pescado",
+   "categoria": "Principales",
+   "minutos": 10,
+   "porciones": 1,
+   "kcal": 316
+  },
+  {
+   "id": 28,
+   "nombre": "Estofado de pollo c/papa y arroz",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 468
+  },
+  {
+   "id": 29,
+   "nombre": "Estofado de pollo c/ papa",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 347
+  },
+  {
+   "id": 30,
+   "nombre": "Tortilla de huevo con tostadas y fruta",
+   "categoria": "Principales",
+   "minutos": 10,
+   "porciones": 1,
+   "kcal": 297
+  },
+  {
+   "id": 31,
+   "nombre": "yogurt con frutos secos",
+   "categoria": "Meriendas/Snacks",
+   "minutos": 2,
+   "porciones": 1,
+   "kcal": 217
+  },
+  {
+   "id": 32,
+   "nombre": "Yogurt con fruta y granola",
+   "categoria": "Meriendas/Snacks",
+   "minutos": 5,
+   "porciones": 1,
+   "kcal": 140
+  },
+  {
+   "id": 33,
+   "nombre": "Pita pizza americana",
+   "categoria": "Principales",
+   "minutos": 15,
+   "porciones": 1,
+   "kcal": 214
+  },
+  {
+   "id": 34,
+   "nombre": "Pita pizza vegetales",
+   "categoria": "Principales",
+   "minutos": 10,
+   "porciones": 1,
+   "kcal": 138
+  },
+  {
+   "id": 35,
+   "nombre": "Crema pollera light",
+   "categoria": "Complementos",
+   "minutos": 3,
+   "porciones": 2,
+   "kcal": 118
+  },
+  {
+   "id": 36,
+   "nombre": "Crema Honey mustard",
+   "categoria": "Complementos",
+   "minutos": 3,
+   "porciones": 2,
+   "kcal": 77
+  },
+  {
+   "id": 37,
+   "nombre": "Vinagreta balsámica",
+   "categoria": "Complementos",
+   "minutos": 3,
+   "porciones": 2,
+   "kcal": 75
+  },
+  {
+   "id": 38,
+   "nombre": "Vinagreta clásica light",
+   "categoria": "Complementos",
+   "minutos": 3,
+   "porciones": 2,
+   "kcal": 96
+  },
+  {
+   "id": 39,
+   "nombre": "Porridge de quinua con fruta",
+   "categoria": "Principales",
+   "minutos": 10,
+   "porciones": 1,
+   "kcal": 195
+  },
+  {
+   "id": 40,
+   "nombre": "Chaufa de quinua",
+   "categoria": "Principales",
+   "minutos": 15,
+   "porciones": 1,
+   "kcal": 488
+  },
+  {
+   "id": 41,
+   "nombre": "Pollo \"KFC\" con papas",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 503
+  },
+  {
+   "id": 42,
+   "nombre": "Pollo \"KFC\"",
+   "categoria": "Principales",
+   "minutos": 25,
+   "porciones": 1,
+   "kcal": 434
+  },
+  {
+   "id": 43,
+   "nombre": "Galletas de avena proteicas",
+   "categoria": "Postres",
+   "minutos": 17,
+   "porciones": 1,
+   "kcal": 387
+  },
+  {
+   "id": 44,
+   "nombre": "Galleta de avena y pasas",
+   "categoria": "Postres",
+   "minutos": 17,
+   "porciones": 1,
+   "kcal": 375
+  },
+  {
+   "id": 45,
+   "nombre": "Galleta de avena y chocolate",
+   "categoria": "Postres",
+   "minutos": 17,
+   "porciones": 1,
+   "kcal": 425
+  },
+  {
+   "id": 46,
+   "nombre": "Galletas de avena",
+   "categoria": "Postres",
+   "minutos": 17,
+   "porciones": 1,
+   "kcal": 350
+  },
+  {
+   "id": 47,
+   "nombre": "Brownie proteico",
+   "categoria": "Postres",
+   "minutos": 27,
+   "porciones": 1,
+   "kcal": 500
+  },
+  {
+   "id": 48,
+   "nombre": "Brownie saludable",
+   "categoria": "Postres",
+   "minutos": 27,
+   "porciones": 1,
+   "kcal": 464
+  },
+  {
+   "id": 49,
+   "nombre": "Tostadas con palta y huevo",
+   "categoria": "Principales",
+   "minutos": 15,
+   "porciones": 1,
+   "kcal": 197
+  },
+  {
+   "id": 50,
+   "nombre": "Tortilla de huevos con verduras",
+   "categoria": "Principales",
+   "minutos": 10,
+   "porciones": 1,
+   "kcal": 238
+  }
+ ]
+}

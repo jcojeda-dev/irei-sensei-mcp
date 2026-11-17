@@ -22,7 +22,9 @@ import datetime as dt
 import json
 import re
 import threading
+import unicodedata
 import uuid
+from functools import lru_cache
 from pathlib import Path
 
 import anthropic
@@ -36,6 +38,7 @@ from supabase_client import _validar_uuid, get_client
 BASE_DIR = Path(__file__).resolve().parent.parent
 RUTA_LOGO = BASE_DIR / "assets" / "logo_irei_sensei.png"
 RUTA_PLANTILLAS = BASE_DIR / "templates"
+RUTA_CATALOGO = BASE_DIR / "data" / "recetas_nutriplace.json"
 BUCKET_BORRADORES = "planes-alimenticios"
 BUCKET_DOCS = "documentos-alumnos"
 MODELO = "claude-sonnet-4-6"
@@ -62,7 +65,18 @@ PROMPT_DIETA = (
     '"agua_litros":number,"enfoque":str},'
     '"dias":[{"dia":"Lunes","comidas":[{"momento":str,"descripcion":str}]}],'
     '"intercambios":[str],"advertencias":[str]}. '
-    "Incluye los 7 días (Lunes a Domingo) con 4 a 5 comidas cada uno, descripciones breves."
+    "Incluye los 7 días (Lunes a Domingo) con 4 a 5 comidas cada uno, descripciones breves. "
+    "Cada comida lleva también \"receta\": el nombre EXACTO de una receta del CATÁLOGO NUTRIPLACE si la usas, o null."
+)
+
+PROMPT_CATALOGO = (
+    "\n\nCATÁLOGO NUTRIPLACE: son recetas base del entrenador. Úsalas como base preferente para "
+    "almuerzos, cenas, meriendas y complementos cuando encajen con el objetivo calórico y las restricciones; "
+    "para usar una, copia su nombre EXACTO en el campo 'receta'. El catálogo NO trae ingredientes ni cantidades: "
+    "no los inventes para esas recetas (puedes sugerir un acompañamiento aparte). Las kcal del catálogo son por "
+    "porción: ajusta con 1 o 2 porciones según el plan. 'Complementos' (vinagretas, cremas) son aderezos para "
+    "acompañar ensaladas. 'Postres': máximo 2 por semana y solo si el objetivo lo permite. Cubre el resto de "
+    "comidas (sobre todo desayunos) y los intercambios con tu criterio experto y alimentos peruanos. Recetas disponibles:\n"
 )
 
 PROMPT_RUTINA = (
@@ -78,6 +92,71 @@ PROMPT_RUTINA = (
     '"ejercicios":[{"nombre":str,"series":int,"repeticiones":str,"descanso":str,"nota":str}],"cierre":str}],'
     '"progresion":[str],"advertencias":[str]}'
 )
+
+
+# ---------------------------------------------------------------------------
+# Catálogo de recetas base (NutriPlace) del entrenador
+# ---------------------------------------------------------------------------
+def _sin_acentos(t: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", t or "") if unicodedata.category(c) != "Mn")
+
+
+def _clave(t: str) -> str:
+    return re.sub(r"[^a-z0-9 ]+", "", _sin_acentos(t).lower()).strip()
+
+
+@lru_cache(maxsize=1)
+def _catalogo() -> list[dict]:
+    """Recetas base. El catálogo NO trae ingredientes ni macros: solo nombre, categoría y kcal."""
+    try:
+        datos = json.loads(RUTA_CATALOGO.read_text(encoding="utf-8"))
+        return [r for r in datos["recetas"] if r.get("nombre") and isinstance(r.get("kcal"), int)]
+    except Exception as e:  # noqa: BLE001
+        print(f"[programas] catálogo de recetas no disponible: {type(e).__name__}")
+        return []
+
+
+# Qué palabras del nombre de una receta delatan un ingrediente conflictivo.
+_GRUPOS = {
+    ("lacteo", "lactosa", "leche", "yogur", "queso"): ("yogurt", "yogur", "queso", "leche", "crema", "mousse", "pizza"),
+    ("gluten", "trigo", "celiac", "harina"): ("tallarin", "wrap", "pita", "tostada", "galleta", "brownie", "granola", "pizza", "avena"),
+    ("huevo",): ("huevo", "tortilla", "brownie", "galleta", "mousse"),
+    ("pescado", "marisco", "atun", "ceviche"): ("atun", "ceviche", "pescado", "salpicon"),
+    ("pollo", "gallina"): ("pollo", "gallina", "kfc", "brocheta"),
+    ("carne", "res ", "lomo", "vacuno"): ("lomo", "carne", "estofado"),
+    ("mani", "nuez", "nueces", "frutos secos", "almendra"): ("frutos secos", "granola", "galleta", "brownie", "mousse"),
+    ("soya", "soja"): ("mousse", "brownie"),
+}
+
+
+def _catalogo_apto(restricciones: str) -> list[dict]:
+    """Quita del catálogo las recetas que chocan con alergias o alimentos que no come."""
+    r = _clave(restricciones or "")
+    if not r or r in ("ninguna", "ninguno"):
+        return _catalogo()
+    prohibidas: set[str] = set()
+    for disparadores, palabras in _GRUPOS.items():
+        if any(d in r for d in disparadores):
+            prohibidas.update(palabras)
+    sueltas = {w for w in re.findall(r"[a-z]{4,}", r) if w not in ("ninguna", "ninguno", "alergia", "intolerancia", "como", "gusta", "gustan")}
+    prohibidas.update(sueltas)
+    return [rec for rec in _catalogo() if not any(p in _clave(rec["nombre"]) for p in prohibidas)]
+
+
+def _texto_catalogo(recetas: list[dict]) -> str:
+    return "\n".join(
+        f"- {r['nombre']} | {r['categoria']} | {r['kcal']} kcal por {r['porciones']} porción(es) | {r['minutos']} min"
+        for r in recetas
+    )
+
+
+def _buscar_receta(nombre: str | None) -> dict | None:
+    """Receta del catálogo cuyo nombre coincide exactamente (sin acentos/mayúsculas/signos)."""
+    if not nombre:
+        return None
+    k = _clave(str(nombre))
+    return next((r for r in _catalogo() if _clave(r["nombre"]) == k), None)
+
 
 _generando: set[str] = set()
 
@@ -134,7 +213,7 @@ def _json_de(texto: str) -> dict:
     return datos
 
 
-def validar_dieta(datos: dict) -> dict:
+def validar_dieta(datos: dict, permitidas: list[dict] | None = None) -> dict:
     r = datos.get("resumen")
     if not isinstance(r, dict):
         raise ProgramaInvalidoError("falta el resumen")
@@ -153,10 +232,20 @@ def validar_dieta(datos: dict) -> dict:
     for d in dias_in:
         if not isinstance(d, dict) or not isinstance(d.get("comidas"), list):
             raise ProgramaInvalidoError("día inválido")
-        comidas = [
-            {"momento": _txt(c.get("momento"), 40), "descripcion": _txt(c.get("descripcion"), 300)}
-            for c in d["comidas"][:7] if isinstance(c, dict)
-        ]
+        comidas = []
+        for c in d["comidas"][:7]:
+            if not isinstance(c, dict):
+                continue
+            comida = {"momento": _txt(c.get("momento"), 40), "descripcion": _txt(c.get("descripcion"), 300),
+                      "receta": None, "receta_kcal": None}
+            if c.get("receta"):
+                rec = _buscar_receta(c.get("receta"))
+                if rec is None:
+                    raise ProgramaInvalidoError("receta que no está en el catálogo")
+                if permitidas is not None and rec["id"] not in {r["id"] for r in permitidas}:
+                    raise ProgramaInvalidoError("receta que choca con las restricciones del alumno")
+                comida["receta"], comida["receta_kcal"] = rec["nombre"], rec["kcal"]  # kcal del catálogo, no de la IA
+            comidas.append(comida)
         if not 3 <= len(comidas) <= 7:
             raise ProgramaInvalidoError("cada día necesita entre 3 y 7 comidas")
         dias.append({"dia": _txt(d.get("dia"), 20), "comidas": comidas})
@@ -298,8 +387,25 @@ def _generar(usuario_id: str, origen: str, indicaciones: str) -> str:
         or (datos["formulario_web"] or {}).get("objetivo") or "No especificado"
     extra = f"Indicaciones del entrenador para esta versión: {indicaciones}" if indicaciones else ""
 
+    restricciones = f"{perfil.get('alergias') or ''} {perfil.get('no_come') or ''}"
+    apto = _catalogo_apto(restricciones)
+    prompt_dieta = PROMPT_DIETA + (PROMPT_CATALOGO + _texto_catalogo(apto) if apto else "")
     try:
-        dieta = validar_dieta(_llamar_ia(PROMPT_DIETA, datos, extra, 6000))
+        dieta = None
+        for intento in range(2):  # un reintento si la IA usa una receta inválida
+            try:
+                dieta = validar_dieta(_llamar_ia(prompt_dieta, datos, extra, 6000), apto)
+                break
+            except ProgramaInvalidoError:
+                if intento == 1:
+                    raise
+        usadas = [c for d in dieta["dias"] for c in d["comidas"] if c["receta"]]
+        tiene_restricciones = _clave(restricciones) not in ("", "ninguna", "ninguna ninguna", "ninguno", "ninguna ninguno")
+        if usadas and tiene_restricciones:
+            dieta["advertencias"].append(
+                "Las recetas de NutriPlace no traen lista de ingredientes: el entrenador debe verificarlas "
+                "contra las alergias o restricciones del alumno antes de enviarlas."
+            )
         rutina = validar_rutina(
             _llamar_ia(PROMPT_RUTINA, {**datos, "dias_de_entrenamiento_por_semana": dias_semana}, extra, 6000),
             dias_semana,
@@ -340,6 +446,7 @@ def _generar(usuario_id: str, origen: str, indicaciones: str) -> str:
         f"Lugar: {perfil.get('lugar') or '—'} · Días/sem: {dias_semana} · Molestias: {perfil.get('molestias') or '—'}\n"
         + (f"Cambios que pidió: {perfil['cambios']}\n" if perfil.get("cambios") else "")
         + f"Dieta ≈ {dieta['resumen']['calorias_aprox']} kcal · {dieta['resumen']['proteinas_g']} g proteína\n"
+        + f"Comidas con receta NutriPlace: {sum(1 for d in dieta['dias'] for c in d['comidas'] if c['receta'])} de {sum(len(d['comidas']) for d in dieta['dias'])}\n"
         + ("Avisos de la IA:\n" + "\n".join(f"- {a}" for a in avisos) + "\n" if avisos else "")
         + "Revisa los PDFs y elige:"
     )

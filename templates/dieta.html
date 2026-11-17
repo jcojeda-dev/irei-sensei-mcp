@@ -22,7 +22,7 @@
 <h2>Menú semanal (se repite durante el mes)</h2>
 {% for d in dieta.dias %}
 <div class="dia"><div class="titulo">{{ d.dia }}</div>
-  {% for c in d.comidas %}<div><span class="momento">{{ c.momento }}:</span> {{ c.descripcion }}</div>{% endfor %}
+  {% for c in d.comidas %}<div><span class="momento">{{ c.momento }}:</span> {{ c.descripcion }}{% if c.receta %} <span class="tag">Receta NutriPlace · {{ c.receta_kcal }} kcal</span>{% endif %}</div>{% endfor %}
 </div>
 {% endfor %}
 {% if dieta.intercambios %}
