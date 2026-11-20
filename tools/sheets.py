@@ -328,7 +328,7 @@ def actualizar_fila(numero: int, valores: dict) -> None:
 
 
 def _copiar_formulas(numero: int, cab: list[str]) -> None:
-    """Copia las fórmulas (sesiones, precio, contador de sesiones...) de la fila de arriba a la fila nueva (mejor esfuerzo)."""
+    """Copia las fórmulas (sesiones, precio, contador de sesiones...) a la fila nueva, desde la fila de arriba o, si ahí no hay fórmula, desde la fila 2 (mejor esfuerzo)."""
     if numero < 3:
         return
     servicio, sid = _servicio_sheets(), cargar_settings().google_sheet_id
@@ -339,18 +339,29 @@ def _copiar_formulas(numero: int, cab: list[str]) -> None:
         spreadsheetId=sid, fields="sheets(properties(sheetId,title))"
     ).execute()["sheets"]
     hoja_id = next(h["properties"]["sheetId"] for h in hojas if h["properties"]["title"] == HOJA)
+    # Fila de arriba y fila 2 (la plantilla), en modo fórmula, en una sola lectura.
+    # Si la de arriba tiene números escritos a mano (ej. plan "especial"), se usa la fila 2.
+    filas_origen = (numero - 1, 2) if numero - 1 != 2 else (2,)
+    leidas = (
+        servicio.spreadsheets().values()
+        .batchGet(spreadsheetId=sid, ranges=[f"{HOJA}!A{n}:Z{n}" for n in filas_origen],
+                  valueRenderOption="FORMULA")
+        .execute().get("valueRanges", [])
+    )
+    formulas = {
+        n: (vr.get("values") or [[]])[0] for n, vr in zip(filas_origen, leidas)
+    }
     peticiones = []
     for col in columnas:
-        celda = f"{HOJA}!{_letra(col)}{numero - 1}"
-        v = (
-            servicio.spreadsheets().values()
-            .get(spreadsheetId=sid, range=celda, valueRenderOption="FORMULA")
-            .execute().get("values", [[""]])
+        origen = next(
+            (n for n in filas_origen
+             if col < len(formulas.get(n, [])) and str(formulas[n][col]).startswith("=")),
+            None,
         )
-        if not (v and v[0] and str(v[0][0]).startswith("=")):
-            continue  # no es fórmula: no se copia un valor ajeno
+        if origen is None:
+            continue  # ninguna fila de referencia tiene fórmula: no se copia un valor ajeno
         peticiones.append({"copyPaste": {
-            "source": {"sheetId": hoja_id, "startRowIndex": numero - 2, "endRowIndex": numero - 1,
+            "source": {"sheetId": hoja_id, "startRowIndex": origen - 1, "endRowIndex": origen,
                        "startColumnIndex": col, "endColumnIndex": col + 1},
             "destination": {"sheetId": hoja_id, "startRowIndex": numero - 1, "endRowIndex": numero,
                             "startColumnIndex": col, "endColumnIndex": col + 1},
