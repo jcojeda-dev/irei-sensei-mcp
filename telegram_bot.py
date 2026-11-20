@@ -303,6 +303,12 @@ def _t_proponer_enviar_recordatorio(chat_id: int, a: dict) -> dict:
         f"Enviar por WhatsApp el recordatorio de {dias} días a {alumno['nombre']} "
         f"(+{alumno['whatsapp']}). Vence: {alumno.get('fecha_vencimiento') or 'sin fecha'}."
     )
+    try:
+        r = hoja.resumen_sesiones(alumno["whatsapp"])
+        if r and r.get("sesiones_restantes") is not None:
+            desc += f" Le quedan {r['sesiones_restantes']} clases."
+    except Exception:  # noqa: BLE001
+        pass
     return _crear_pendiente(
         chat_id, "enviar_recordatorio", {"alumno_id": alumno["id"], "tipo": tipo}, desc
     )

@@ -37,7 +37,7 @@ def _nombres(ids: list[str]) -> dict[str, str]:
     return {f["id"]: f["nombre"] for f in filas}
 
 
-def _avisar_resumen_telegram(enviados: list[str], fallidos: list[dict]) -> None:
+def _avisar_resumen_telegram(enviados: list[str], fallidos: list[dict], clases: dict | None = None) -> None:
     """Resumen a Isamu/JC solo si hubo envíos o fallos (best-effort)."""
     if not enviados and not fallidos:
         return
@@ -45,7 +45,11 @@ def _avisar_resumen_telegram(enviados: list[str], fallidos: list[dict]) -> None:
         nombres = _nombres(enviados + [f["usuario_id"] for f in fallidos])
         lineas = ["📅 Recordatorios de membresía"]
         if enviados:
-            lineas.append("Enviados: " + ", ".join(nombres.get(i, i) for i in enviados))
+            clases = clases or {}
+            lineas.append("Enviados: " + ", ".join(
+                nombres.get(i, i) + (f" ({clases[i]} clases restantes)" if clases.get(i) is not None else "")
+                for i in enviados
+            ))
         for f in fallidos:
             lineas.append(
                 f"❌ Falló {nombres.get(f['usuario_id'], f['usuario_id'])}: {f['error'][:150]}"
@@ -63,6 +67,7 @@ def revisar_vencimientos() -> dict:
     """
     hoy = _hoy_lima()
     enviados, omitidos, fallidos = [], [], []
+    clases: dict[str, int | None] = {}
     fechas_buscadas = {}
 
     for dias, tipo in VENTANAS.items():
@@ -81,8 +86,9 @@ def revisar_vencimientos() -> dict:
                 omitidos.append(u["id"])
                 continue
             try:
-                enviar_whatsapp(u["id"], tipo)
+                r = enviar_whatsapp(u["id"], tipo)
                 enviados.append(u["id"])
+                clases[u["id"]] = r.get("clases_restantes")
             except Exception as e:  # no detener el batch por un fallo individual
                 fallidos.append({"usuario_id": u["id"], "error": str(e)})
 
@@ -90,7 +96,7 @@ def revisar_vencimientos() -> dict:
         f"[recordatorios] hoy(Lima)={hoy} buscadas={fechas_buscadas} "
         f"enviados={len(enviados)} omitidos={len(omitidos)} fallidos={fallidos}"
     )
-    _avisar_resumen_telegram(enviados, fallidos)
+    _avisar_resumen_telegram(enviados, fallidos, clases)
 
     # Aprovecha el cron diario para reenviar avisos de interesados que no salieron.
     reintentos = {}
