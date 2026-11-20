@@ -328,7 +328,7 @@ def actualizar_fila(numero: int, valores: dict) -> None:
 
 
 def _copiar_formulas(numero: int, cab: list[str]) -> None:
-    """Copia las fórmulas (sesiones, precio, contador de sesiones...) de la fila de arriba a la fila nueva (mejor esfuerzo)."""
+    """Copia las fórmulas (sesiones, precio, contador de sesiones...) a la fila nueva, desde la fila de arriba o, si ahí no hay fórmula, desde la fila 2 (mejor esfuerzo)."""
     if numero < 3:
         return
     servicio, sid = _servicio_sheets(), cargar_settings().google_sheet_id
@@ -339,18 +339,29 @@ def _copiar_formulas(numero: int, cab: list[str]) -> None:
         spreadsheetId=sid, fields="sheets(properties(sheetId,title))"
     ).execute()["sheets"]
     hoja_id = next(h["properties"]["sheetId"] for h in hojas if h["properties"]["title"] == HOJA)
+    # Fila de arriba y fila 2 (la plantilla), en modo fórmula, en una sola lectura.
+    # Si la de arriba tiene números escritos a mano (ej. plan "especial"), se usa la fila 2.
+    filas_origen = (numero - 1, 2) if numero - 1 != 2 else (2,)
+    leidas = (
+        servicio.spreadsheets().values()
+        .batchGet(spreadsheetId=sid, ranges=[f"{HOJA}!A{n}:Z{n}" for n in filas_origen],
+                  valueRenderOption="FORMULA")
+        .execute().get("valueRanges", [])
+    )
+    formulas = {
+        n: (vr.get("values") or [[]])[0] for n, vr in zip(filas_origen, leidas)
+    }
     peticiones = []
     for col in columnas:
-        celda = f"{HOJA}!{_letra(col)}{numero - 1}"
-        v = (
-            servicio.spreadsheets().values()
-            .get(spreadsheetId=sid, range=celda, valueRenderOption="FORMULA")
-            .execute().get("values", [[""]])
+        origen = next(
+            (n for n in filas_origen
+             if col < len(formulas.get(n, [])) and str(formulas[n][col]).startswith("=")),
+            None,
         )
-        if not (v and v[0] and str(v[0][0]).startswith("=")):
-            continue  # no es fórmula: no se copia un valor ajeno
+        if origen is None:
+            continue  # ninguna fila de referencia tiene fórmula: no se copia un valor ajeno
         peticiones.append({"copyPaste": {
-            "source": {"sheetId": hoja_id, "startRowIndex": numero - 2, "endRowIndex": numero - 1,
+            "source": {"sheetId": hoja_id, "startRowIndex": origen - 1, "endRowIndex": origen,
                        "startColumnIndex": col, "endColumnIndex": col + 1},
             "destination": {"sheetId": hoja_id, "startRowIndex": numero - 1, "endRowIndex": numero,
                             "startColumnIndex": col, "endColumnIndex": col + 1},
@@ -576,3 +587,50 @@ def registrar_alumno_nuevo(datos: dict) -> int:
     for i, dia in enumerate((datos.get("dias") or [])[:MAX_DIAS], start=1):
         fila[f"dia_{i}"] = dia
     return agregar_fila(fila)
+
+
+# ---------------------------------------------------------------------------
+# Alumnos agregados a mano en el Sheet: el bot los encuentra y los importa
+# ---------------------------------------------------------------------------
+def buscar_en_sheet(consulta: str, limite: int = 5) -> list[dict]:
+    """Filas de "Alumnos" cuyo nombre contiene la consulta (sin tildes) o cuyo WhatsApp contiene sus dígitos."""
+    texto = _sin_tildes(consulta)
+    digitos = "".join(c for c in consulta if c.isdigit())
+    cab, filas = _leer_hoja()
+    vistos, salida = set(), []
+    for fila in filas:
+        d = dict(zip(cab, fila + [""] * (len(cab) - len(fila))))
+        nombre = d.get("nombre", "").strip()
+        wa = _normalizar_whatsapp(d.get("whatsapp", ""))
+        if not nombre or not wa or wa in vistos:
+            continue
+        por_nombre = len(texto) >= 2 and texto in _sin_tildes(nombre)
+        por_numero = len(digitos) >= 6 and digitos in wa
+        if por_nombre or por_numero:
+            vistos.add(wa)
+            salida.append(d)
+            if len(salida) >= limite:
+                break
+    return salida
+
+
+def importar_alumno(fila: dict) -> None:
+    """Crea o actualiza al alumno en Supabase a partir de su fila del Sheet (como sync_sheet_to_db, pero de uno)."""
+    whatsapp = _normalizar_whatsapp(fila.get("whatsapp", ""))
+    if not whatsapp:
+        raise ValueError("WhatsApp inválido en el Sheet")
+    datos = {"nombre": fila["nombre"].strip(), "whatsapp": whatsapp}
+    email = (fila.get("email") or "").strip()
+    plan = (fila.get("plan") or "").strip().lower()
+    if email:
+        datos["email"] = email
+    if plan:
+        datos["plan"] = plan
+    try:
+        inicio, fin = _membresia_de_fila(fila)
+    except ValueError:
+        inicio = fin = None
+    if fin is not None:
+        datos["fecha_inicio"] = (inicio or fin).isoformat()
+        datos["fecha_vencimiento"] = fin.isoformat()
+    get_client().table("usuarios").upsert(datos, on_conflict="whatsapp").execute()
