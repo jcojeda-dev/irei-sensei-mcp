@@ -587,3 +587,50 @@ def registrar_alumno_nuevo(datos: dict) -> int:
     for i, dia in enumerate((datos.get("dias") or [])[:MAX_DIAS], start=1):
         fila[f"dia_{i}"] = dia
     return agregar_fila(fila)
+
+
+# ---------------------------------------------------------------------------
+# Alumnos agregados a mano en el Sheet: el bot los encuentra y los importa
+# ---------------------------------------------------------------------------
+def buscar_en_sheet(consulta: str, limite: int = 5) -> list[dict]:
+    """Filas de "Alumnos" cuyo nombre contiene la consulta (sin tildes) o cuyo WhatsApp contiene sus dígitos."""
+    texto = _sin_tildes(consulta)
+    digitos = "".join(c for c in consulta if c.isdigit())
+    cab, filas = _leer_hoja()
+    vistos, salida = set(), []
+    for fila in filas:
+        d = dict(zip(cab, fila + [""] * (len(cab) - len(fila))))
+        nombre = d.get("nombre", "").strip()
+        wa = _normalizar_whatsapp(d.get("whatsapp", ""))
+        if not nombre or not wa or wa in vistos:
+            continue
+        por_nombre = len(texto) >= 2 and texto in _sin_tildes(nombre)
+        por_numero = len(digitos) >= 6 and digitos in wa
+        if por_nombre or por_numero:
+            vistos.add(wa)
+            salida.append(d)
+            if len(salida) >= limite:
+                break
+    return salida
+
+
+def importar_alumno(fila: dict) -> None:
+    """Crea o actualiza al alumno en Supabase a partir de su fila del Sheet (como sync_sheet_to_db, pero de uno)."""
+    whatsapp = _normalizar_whatsapp(fila.get("whatsapp", ""))
+    if not whatsapp:
+        raise ValueError("WhatsApp inválido en el Sheet")
+    datos = {"nombre": fila["nombre"].strip(), "whatsapp": whatsapp}
+    email = (fila.get("email") or "").strip()
+    plan = (fila.get("plan") or "").strip().lower()
+    if email:
+        datos["email"] = email
+    if plan:
+        datos["plan"] = plan
+    try:
+        inicio, fin = _membresia_de_fila(fila)
+    except ValueError:
+        inicio = fin = None
+    if fin is not None:
+        datos["fecha_inicio"] = (inicio or fin).isoformat()
+        datos["fecha_vencimiento"] = fin.isoformat()
+    get_client().table("usuarios").upsert(datos, on_conflict="whatsapp").execute()

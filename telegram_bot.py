@@ -94,6 +94,25 @@ def _t_buscar_alumno(chat_id: int, a: dict) -> dict:
         if f["id"] not in vistos:
             vistos.add(f["id"])
             unicos.append(f)
+
+    # Alumnos agregados a mano en el Sheet que aún no están en la base: se importan al vuelo.
+    try:
+        en_base = {f["whatsapp"] for f in unicos}
+        for fila in hoja.buscar_en_sheet(q):
+            wa = hoja._normalizar_whatsapp(fila.get("whatsapp", ""))
+            if wa in en_base:
+                continue
+            hoja.importar_alumno(fila)
+            nuevo = (
+                c.table("usuarios").select(COLUMNAS_ALUMNO)
+                .eq("whatsapp", wa).limit(1).execute().data
+            )
+            if nuevo and nuevo[0]["id"] not in vistos:
+                vistos.add(nuevo[0]["id"])
+                unicos.append(nuevo[0])
+                en_base.add(wa)
+    except Exception as e:  # noqa: BLE001
+        print(f"[telegram] búsqueda en el Sheet falló: {type(e).__name__}")
     return {"alumnos": unicos[:5]}
 
 
