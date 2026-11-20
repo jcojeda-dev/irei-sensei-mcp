@@ -39,6 +39,18 @@ COLUMNAS_ESPERADAS = [
     # "sesiones" y "precio" son FÓRMULAS del Sheet: el servidor no las lee ni las escribe.
 ]
 
+# Columnas que son FÓRMULAS en "Alumnos": nunca se escriben, se copian de la fila de arriba.
+COLUMNAS_FORMULA = (
+    "sesiones", "precio", "clases_semana",
+    "sesiones_total", "sesiones_realizadas", "sesiones_restantes",
+)
+
+# Bitácora de sesiones: una fila por sesión confirmada desde Telegram.
+# Columnas: fecha | nombre | whatsapp | nota. El Sheet cuenta las filas por WhatsApp.
+HOJA_SESIONES = "sesiones_log"
+
+DIAS_SEMANA = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+
 
 def _credenciales_service_account(valor: str):
     """
@@ -285,6 +297,10 @@ def buscar_fila_alumno(whatsapp: str) -> int | None:
     Las filas que solo traen mediciones no se tocan.
     """
     cab, filas = _leer_hoja()
+    return _buscar_en(cab, filas, whatsapp)
+
+
+def _buscar_en(cab: list[str], filas: list[list[str]], whatsapp: str) -> int | None:
     i_wa, i_plan = cab.index("whatsapp"), cab.index("plan") if "plan" in cab else None
     con_plan, cualquiera = None, None
     for n, f in enumerate(filas, start=2):
@@ -312,11 +328,11 @@ def actualizar_fila(numero: int, valores: dict) -> None:
 
 
 def _copiar_formulas(numero: int, cab: list[str]) -> None:
-    """Copia las fórmulas de sesiones/precio de la fila de arriba a la fila nueva (mejor esfuerzo)."""
+    """Copia las fórmulas (sesiones, precio, contador de sesiones...) de la fila de arriba a la fila nueva (mejor esfuerzo)."""
     if numero < 3:
         return
     servicio, sid = _servicio_sheets(), cargar_settings().google_sheet_id
-    columnas = [cab.index(c) for c in ("sesiones", "precio") if c in cab]
+    columnas = [cab.index(c) for c in COLUMNAS_FORMULA if c in cab]
     if not columnas:
         return
     hojas = servicio.spreadsheets().get(
@@ -370,7 +386,7 @@ def agregar_fila(valores: dict) -> int:
         numero = _siguiente_fila_libre(cab, filas)
         datos = []
         for h in cab:
-            if h in ("sesiones", "precio"):
+            if h in COLUMNAS_FORMULA:
                 continue
             v = _texto_seguro(valores.get(h))
             if v:
@@ -413,3 +429,150 @@ def registrar_membresia(
         "fecha_inicio": inicio.isoformat(), "meses": meses, "fecha_fin": fin.isoformat(),
     })
     return "agregada"
+
+
+# ---------------------------------------------------------------------------
+# Sesiones: contador y días de entrenamiento
+# ---------------------------------------------------------------------------
+def _a_int_o_none(valor) -> int | None:
+    v = _a_float_o_none(str(valor or ""))
+    return int(v) if v is not None else None
+
+
+def _sin_tildes(texto: str) -> str:
+    return (texto or "").strip().lower().translate(str.maketrans("áéíóú", "aeiou"))
+
+
+def _resumen_de_fila(cab: list[str], fila: list[str]) -> dict:
+    d = dict(zip(cab, fila + [""] * (len(cab) - len(fila))))
+    dias = [d.get(f"dia_{i}", "").strip() for i in range(1, 8)]
+    return {
+        "nombre": d.get("nombre", "").strip(),
+        "whatsapp": _normalizar_whatsapp(d.get("whatsapp", "")),
+        "plan": d.get("plan", "").strip(),
+        "clases_semana": _a_int_o_none(d.get("clases_semana")),
+        "dias": [x for x in dias if x],
+        "sesiones_total": _a_int_o_none(d.get("sesiones_total")),
+        "sesiones_realizadas": _a_int_o_none(d.get("sesiones_realizadas")),
+        "sesiones_restantes": _a_int_o_none(d.get("sesiones_restantes")),
+    }
+
+
+def resumen_sesiones(whatsapp: str) -> dict | None:
+    """Contador de sesiones y días de entrenamiento del alumno (según el Sheet), o None si no está."""
+    whatsapp = _normalizar_whatsapp(whatsapp) or whatsapp
+    cab, filas = _leer_hoja()
+    numero = _buscar_en(cab, filas, whatsapp)
+    if not numero:
+        return None
+    return _resumen_de_fila(cab, filas[numero - 2])
+
+
+def sesiones_en_fecha(whatsapp: str, fecha: date) -> int:
+    """Cuántas sesiones tiene ya registradas el alumno en esa fecha (para avisar duplicados)."""
+    whatsapp = _normalizar_whatsapp(whatsapp) or whatsapp
+    valores = (
+        _servicio_sheets().spreadsheets().values()
+        .get(spreadsheetId=cargar_settings().google_sheet_id, range=f"{HOJA_SESIONES}!A2:C")
+        .execute().get("values", [])
+    )
+    n = 0
+    for f in valores:
+        if len(f) < 3 or _normalizar_whatsapp(f[2]) != whatsapp:
+            continue
+        try:
+            if _a_fecha(f[0]) == fecha:
+                n += 1
+        except ValueError:
+            continue
+    return n
+
+
+def registrar_sesion(whatsapp: str, nombre: str, fecha: date, nota: str = "") -> None:
+    """
+    Agrega UNA fila a la bitácora de sesiones. El Sheet descuenta solo:
+    sesiones_restantes = sesiones_total - filas de ese WhatsApp desde el inicio del periodo.
+    """
+    whatsapp = _normalizar_whatsapp(whatsapp)
+    if not whatsapp:
+        raise ValueError("WhatsApp inválido")
+    with _candado_hoja:
+        _servicio_sheets().spreadsheets().values().append(
+            spreadsheetId=cargar_settings().google_sheet_id,
+            range=f"{HOJA_SESIONES}!A:D",
+            valueInputOption="USER_ENTERED",
+            insertDataOption="INSERT_ROWS",
+            body={"values": [[fecha.isoformat(), _texto_seguro(nombre), whatsapp, _texto_seguro(nota)]]},
+        ).execute()
+
+
+def alumnos_por_dia(dia: str) -> list[dict]:
+    """Alumnos que tienen ese día (lunes, martes...) en dia_1..dia_N, con su contador."""
+    buscado = _sin_tildes(dia)
+    cab, filas = _leer_hoja()
+    vistos, salida = set(), []
+    for fila in filas:
+        r = _resumen_de_fila(cab, fila)
+        if not r["nombre"] or r["whatsapp"] in vistos:
+            continue
+        if any(_sin_tildes(d) == buscado for d in r["dias"]):
+            vistos.add(r["whatsapp"])
+            salida.append(r)
+    return salida
+
+
+# ---------------------------------------------------------------------------
+# Alta de alumnos desde Telegram
+# ---------------------------------------------------------------------------
+# Nombres exactos de los desplegables de dia_1..dia_6 (pestaña "datos", columna F).
+DIAS_ENTRENAMIENTO = ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado")
+MAX_DIAS = 6
+
+
+def planes_disponibles() -> dict[str, dict]:
+    """Planes de la pestaña "datos": {"hajimete": {"nombre": "hajimete", "sesiones": 8, "clases_semana": 2}, ...}."""
+    valores = (
+        _servicio_sheets().spreadsheets().values()
+        .get(spreadsheetId=cargar_settings().google_sheet_id, range="datos!A2:D")
+        .execute().get("values", [])
+    )
+    planes = {}
+    for f in valores:
+        f = f + [""] * (4 - len(f))
+        nombre = f[0].strip()
+        if nombre:
+            planes[nombre.lower()] = {
+                "nombre": nombre,
+                "sesiones": _a_int_o_none(f[1]),
+                "clases_semana": _a_int_o_none(f[3]),
+            }
+    return planes
+
+
+def normalizar_dia(dia: str) -> str | None:
+    """'miercoles' / 'MIÉRCOLES' -> 'Miércoles'. None si no es un día de entrenamiento."""
+    buscado = _sin_tildes(dia)
+    return next((d for d in DIAS_ENTRENAMIENTO if _sin_tildes(d) == buscado), None)
+
+
+def registrar_alumno_nuevo(datos: dict) -> int:
+    """
+    Agrega al alumno en "Alumnos" (una fila nueva, con fórmulas copiadas).
+    'datos' usa los encabezados del Sheet; 'dias' es una lista de días ya normalizados.
+    Falla si el WhatsApp ya existe. Devuelve el número de fila.
+    """
+    whatsapp = _normalizar_whatsapp(datos.get("whatsapp", ""))
+    if not whatsapp:
+        raise ValueError("WhatsApp inválido")
+    if buscar_fila_alumno(whatsapp):
+        raise ValueError("Ese WhatsApp ya está registrado en el Sheet")
+    fila = {k: v for k, v in datos.items() if k != "dias" and v not in (None, "")}
+    fila["whatsapp"] = whatsapp
+    for k in ("peso_kg", "porcentaje_grasa"):
+        if isinstance(fila.get(k), float):
+            # El Sheet está en español (coma decimal): 72.5 se escribe "72,5".
+            v = fila[k]
+            fila[k] = str(int(v)) if v.is_integer() else f"{v:.1f}".replace(".", ",")
+    for i, dia in enumerate((datos.get("dias") or [])[:MAX_DIAS], start=1):
+        fila[f"dia_{i}"] = dia
+    return agregar_fila(fila)

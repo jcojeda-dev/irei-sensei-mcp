@@ -11,7 +11,7 @@
 create table if not exists public.acciones_pendientes_telegram (
   id uuid primary key default gen_random_uuid(),
   chat_id bigint not null,
-  accion text not null check (accion in ('enviar_recordatorio','generar_plan','generar_pdf','actualizar_membresia')),
+  accion text not null check (accion in ('enviar_recordatorio','generar_plan','generar_pdf','generar_programa','actualizar_membresia','registrar_sesion','registrar_alumno')),
   params jsonb not null,
   descripcion text not null,       -- texto armado por el servidor, no por la IA
   usada boolean not null default false,
@@ -33,3 +33,14 @@ alter table public.acciones_pendientes_telegram
 alter table public.acciones_pendientes_telegram
   add constraint acciones_pendientes_telegram_accion_check
   check (accion in ('enviar_recordatorio','generar_plan','generar_pdf','actualizar_membresia'));
+
+-- =========================================================
+-- BLOQUE EXTRA 2: permitir las acciones 'registrar_sesion' (descontar sesiones)
+-- y 'registrar_alumno' (alta desde Telegram). Incluye 'generar_programa', que el bot ya usa.
+-- =========================================================
+alter table public.acciones_pendientes_telegram
+  drop constraint if exists acciones_pendientes_telegram_accion_check;
+alter table public.acciones_pendientes_telegram
+  add constraint acciones_pendientes_telegram_accion_check
+  check (accion in ('enviar_recordatorio','generar_plan','generar_pdf','generar_programa',
+                    'actualizar_membresia','registrar_sesion','registrar_alumno'));
