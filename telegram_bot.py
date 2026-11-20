@@ -112,7 +112,13 @@ def _t_buscar_alumno(chat_id: int, a: dict) -> dict:
                 unicos.append(nuevo[0])
                 en_base.add(wa)
     except Exception as e:  # noqa: BLE001
-        print(f"[telegram] búsqueda en el Sheet falló: {type(e).__name__}")
+        detalle = str(e)[:300]
+        print(f"[telegram] búsqueda en el Sheet falló: {type(e).__name__}: {detalle}")
+        return {
+            "alumnos": unicos[:5],
+            "error_sheet": f"No pude traer al alumno desde el Sheet ({type(e).__name__}): {detalle}",
+            "nota": "Si no hay alumnos, dile a Isamu el error_sheet tal cual para que lo revise.",
+        }
     return {"alumnos": unicos[:5]}
 
 
