@@ -519,3 +519,60 @@ def alumnos_por_dia(dia: str) -> list[dict]:
             vistos.add(r["whatsapp"])
             salida.append(r)
     return salida
+
+
+# ---------------------------------------------------------------------------
+# Alta de alumnos desde Telegram
+# ---------------------------------------------------------------------------
+# Nombres exactos de los desplegables de dia_1..dia_6 (pestaña "datos", columna F).
+DIAS_ENTRENAMIENTO = ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado")
+MAX_DIAS = 6
+
+
+def planes_disponibles() -> dict[str, dict]:
+    """Planes de la pestaña "datos": {"hajimete": {"nombre": "hajimete", "sesiones": 8, "clases_semana": 2}, ...}."""
+    valores = (
+        _servicio_sheets().spreadsheets().values()
+        .get(spreadsheetId=cargar_settings().google_sheet_id, range="datos!A2:D")
+        .execute().get("values", [])
+    )
+    planes = {}
+    for f in valores:
+        f = f + [""] * (4 - len(f))
+        nombre = f[0].strip()
+        if nombre:
+            planes[nombre.lower()] = {
+                "nombre": nombre,
+                "sesiones": _a_int_o_none(f[1]),
+                "clases_semana": _a_int_o_none(f[3]),
+            }
+    return planes
+
+
+def normalizar_dia(dia: str) -> str | None:
+    """'miercoles' / 'MIÉRCOLES' -> 'Miércoles'. None si no es un día de entrenamiento."""
+    buscado = _sin_tildes(dia)
+    return next((d for d in DIAS_ENTRENAMIENTO if _sin_tildes(d) == buscado), None)
+
+
+def registrar_alumno_nuevo(datos: dict) -> int:
+    """
+    Agrega al alumno en "Alumnos" (una fila nueva, con fórmulas copiadas).
+    'datos' usa los encabezados del Sheet; 'dias' es una lista de días ya normalizados.
+    Falla si el WhatsApp ya existe. Devuelve el número de fila.
+    """
+    whatsapp = _normalizar_whatsapp(datos.get("whatsapp", ""))
+    if not whatsapp:
+        raise ValueError("WhatsApp inválido")
+    if buscar_fila_alumno(whatsapp):
+        raise ValueError("Ese WhatsApp ya está registrado en el Sheet")
+    fila = {k: v for k, v in datos.items() if k != "dias" and v not in (None, "")}
+    fila["whatsapp"] = whatsapp
+    for k in ("peso_kg", "porcentaje_grasa"):
+        if isinstance(fila.get(k), float):
+            # El Sheet está en español (coma decimal): 72.5 se escribe "72,5".
+            v = fila[k]
+            fila[k] = str(int(v)) if v.is_integer() else f"{v:.1f}".replace(".", ",")
+    for i, dia in enumerate((datos.get("dias") or [])[:MAX_DIAS], start=1):
+        fila[f"dia_{i}"] = dia
+    return agregar_fila(fila)
