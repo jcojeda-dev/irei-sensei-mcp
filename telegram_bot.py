@@ -526,6 +526,40 @@ def _t_proponer_registrar_alumno(chat_id: int, a: dict) -> dict:
     return _crear_pendiente(chat_id, "registrar_alumno", params, "\n".join(lineas))
 
 
+# Tablas con datos del alumno (columna usuario_id). Se borran antes que el alumno.
+# "pagos" y "leads" NO se tocan: son historial de cobros y de contactos.
+TABLAS_DEL_ALUMNO = (
+    "evaluaciones", "documentos_alumno", "perfil_plan", "planes_borrador",
+    "programas_alimenticios", "recordatorios_enviados", "conversaciones",
+)
+
+
+def _t_proponer_eliminar_alumno(chat_id: int, a: dict) -> dict:
+    alumno = _alumno_por_id(str(a.get("alumno_id", "")))
+    if not alumno:
+        return {"error": "Alumno no encontrado. Búscalo primero con buscar_alumno."}
+    try:
+        en_sheet = hoja.contar_en_sheet(alumno["whatsapp"])
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"No pude revisar el Sheet: {type(e).__name__}"}
+    partes = []
+    if en_sheet["filas_alumno"]:
+        partes.append("su fila en la hoja Alumnos")
+    if en_sheet["sesiones"]:
+        partes.append(f"{en_sheet['sesiones']} sesión(es) registradas")
+    partes.append("sus datos en la base (evaluaciones, planes, documentos y recordatorios)")
+    desc = (
+        f"🗑 ELIMINAR definitivamente a {alumno['nombre']} (+{alumno['whatsapp']}).\n"
+        f"Se borrará: {', '.join(partes)}.\n"
+        "Los pagos registrados no se tocan.\n"
+        "⚠️ Esto NO se puede deshacer."
+    )
+    return _crear_pendiente(
+        chat_id, "eliminar_alumno",
+        {"alumno_id": alumno["id"], "whatsapp": alumno["whatsapp"], "nombre": alumno["nombre"]}, desc,
+    )
+
+
 HERRAMIENTAS = {
     "buscar_alumno": _t_buscar_alumno,
     "ver_alumno": _t_ver_alumno,
@@ -541,6 +575,7 @@ HERRAMIENTAS = {
     "alumnos_del_dia": _t_alumnos_del_dia,
     "proponer_registrar_sesion": _t_proponer_registrar_sesion,
     "proponer_registrar_alumno": _t_proponer_registrar_alumno,
+    "proponer_eliminar_alumno": _t_proponer_eliminar_alumno,
     "proponer_enviar_recordatorio": _t_proponer_enviar_recordatorio,
     "proponer_generar_plan": _t_proponer_generar_plan,
     "proponer_generar_pdf": _t_proponer_generar_pdf,
@@ -611,6 +646,9 @@ ESQUEMAS = [
          "edad": {"type": "integer"},
          "notas": {"type": "string", "maxLength": 300}},
        "required": ["nombre", "whatsapp"]}},
+    {"name": "proponer_eliminar_alumno",
+     "description": "PROPONE eliminar definitivamente a un alumno (de la base y del Sheet). No lo elimina: pide confirmación con botones. Úsalo solo si Isamu pide eliminar/borrar a un alumno; si hay varios con nombre parecido, pregunta cuál antes de proponer.",
+     "input_schema": {"type": "object", "properties": _ID, "required": ["alumno_id"]}},
     {"name": "proponer_enviar_recordatorio",
      "description": "PROPONE enviar el recordatorio de vencimiento por WhatsApp. No lo envía: pide confirmación con botones.",
      "input_schema": {"type": "object", "properties": {**_ID, "tipo": {"type": "string", "enum": ["recordatorio_15", "recordatorio_5"]}}, "required": ["alumno_id", "tipo"]}},
@@ -638,6 +676,8 @@ def _prompt_sistema() -> str:
         "- Cuando Isamu diga que un alumno entrenó, vino o hizo su sesión, usa "
         "proponer_registrar_sesion (una vez por alumno). Si dice 'los de hoy', primero usa "
         "alumnos_del_dia y propone una sesión por cada alumno que nombre o confirme.\n"
+        "- Si Isamu pide eliminar o borrar a un alumno, búscalo y usa proponer_eliminar_alumno. "
+        "Nunca lo propongas por iniciativa propia.\n"
         "- Para registrar un alumno nuevo usa proponer_registrar_alumno. Necesitas al menos "
         "nombre y WhatsApp; si falta alguno, pídelo. No inventes datos que Isamu no dio. "
         "Si dice el plan pero no la fecha de inicio, pregunta si empieza hoy.\n"
@@ -713,6 +753,23 @@ def _ejecutar_accion(accion: str, params: dict) -> str:
     if accion == "generar_pdf":
         generar_pdf_plan(params["alumno_id"])
         return "PDF generado. Te llegó una copia por Telegram."
+    if accion == "eliminar_alumno":
+        db = get_client()
+        uid = params["alumno_id"]
+        for tabla in TABLAS_DEL_ALUMNO:
+            try:
+                db.table(tabla).delete().eq("usuario_id", uid).execute()
+            except Exception as e:  # noqa: BLE001
+                # Una tabla que no existe en esta base no debe frenar el borrado.
+                print(f"[telegram] eliminar_alumno: {tabla} falló: {type(e).__name__}: {str(e)[:150]}")
+        db.table("usuarios").delete().eq("id", uid).execute()
+        try:
+            r = hoja.eliminar_alumno_sheet(params["whatsapp"])
+            sheet = f"Sheet: {r['filas_alumno']} fila(s) y {r['sesiones']} sesión(es) borradas."
+        except Exception as e:  # noqa: BLE001
+            sheet = (f"⚠️ No pude borrarlo del Sheet ({type(e).__name__}); bórralo a mano o el bot "
+                     "lo volverá a encontrar.")
+        return f"{params['nombre']} eliminado de la base. {sheet}"
     if accion == "registrar_alumno":
         fila = hoja.registrar_alumno_nuevo({
             **params,

@@ -634,3 +634,62 @@ def importar_alumno(fila: dict) -> None:
         datos["fecha_inicio"] = (inicio or fin).isoformat()
         datos["fecha_vencimiento"] = fin.isoformat()
     get_client().table("usuarios").upsert(datos, on_conflict="whatsapp").execute()
+
+
+# ---------------------------------------------------------------------------
+# Eliminar alumno (desde Telegram, con confirmación)
+# ---------------------------------------------------------------------------
+def _ids_hojas() -> dict[str, int]:
+    hojas = _servicio_sheets().spreadsheets().get(
+        spreadsheetId=cargar_settings().google_sheet_id, fields="sheets(properties(sheetId,title))"
+    ).execute()["sheets"]
+    return {h["properties"]["title"]: h["properties"]["sheetId"] for h in hojas}
+
+
+def contar_en_sheet(whatsapp: str) -> dict:
+    """Cuántas filas del alumno hay en "Alumnos" y en la bitácora de sesiones."""
+    whatsapp = _normalizar_whatsapp(whatsapp) or whatsapp
+    cab, filas = _leer_hoja()
+    i_wa = cab.index("whatsapp")
+    n_alumno = sum(1 for f in filas if len(f) > i_wa and _normalizar_whatsapp(f[i_wa]) == whatsapp)
+    log = (
+        _servicio_sheets().spreadsheets().values()
+        .get(spreadsheetId=cargar_settings().google_sheet_id, range=f"{HOJA_SESIONES}!C2:C")
+        .execute().get("values", [])
+    )
+    n_sesiones = sum(1 for f in log if f and _normalizar_whatsapp(f[0]) == whatsapp)
+    return {"filas_alumno": n_alumno, "sesiones": n_sesiones}
+
+
+def eliminar_alumno_sheet(whatsapp: str) -> dict:
+    """
+    Borra las filas del alumno en "Alumnos" y sus sesiones en la bitácora.
+    Se borran de abajo hacia arriba para que los números de fila no se corran.
+    """
+    whatsapp = _normalizar_whatsapp(whatsapp)
+    if not whatsapp:
+        raise ValueError("WhatsApp inválido")
+    servicio, sid = _servicio_sheets(), cargar_settings().google_sheet_id
+    with _candado_hoja:
+        ids = _ids_hojas()
+        cab, filas = _leer_hoja()
+        i_wa = cab.index("whatsapp")
+        filas_alumno = [
+            n for n, f in enumerate(filas, start=2)
+            if len(f) > i_wa and _normalizar_whatsapp(f[i_wa]) == whatsapp
+        ]
+        log = (
+            servicio.spreadsheets().values()
+            .get(spreadsheetId=sid, range=f"{HOJA_SESIONES}!C2:C").execute().get("values", [])
+        )
+        filas_log = [n for n, f in enumerate(log, start=2) if f and _normalizar_whatsapp(f[0]) == whatsapp]
+
+        peticiones = []
+        for hoja, numeros in ((HOJA, filas_alumno), (HOJA_SESIONES, filas_log)):
+            for n in sorted(numeros, reverse=True):
+                peticiones.append({"deleteDimension": {"range": {
+                    "sheetId": ids[hoja], "dimension": "ROWS", "startIndex": n - 1, "endIndex": n,
+                }}})
+        if peticiones:
+            servicio.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": peticiones}).execute()
+    return {"filas_alumno": len(filas_alumno), "sesiones": len(filas_log)}
